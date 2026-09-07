@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="PO Tracking - pencatatan pengiriman dan penerimaan berkas Purchase Order">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Cpath d='M19 12h19l10 10v30H19z' fill='white'/%3E%3Cpath d='M38 12v12h12' fill='none' stroke='%232563eb' stroke-width='4'/%3E%3Cpath d='M27 34h13M27 42h13' stroke='%2364748b' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <title>PO Tracking</title>
+  <style>
+    :root{--bg:#f1f5f9;--surface:#fff;--surface2:#f8fafc;--border:#dbe4ee;--text:#0f172a;--muted:#64748b;--primary:#2563eb;--primary2:#1d4ed8;--success:#16a34a;--successBg:#dcfce7;--danger:#dc2626;--dangerBg:#fee2e2;--warning:#d97706;--warningBg:#fef3c7;--shadow:0 8px 28px rgba(15,23,42,.07);--radius:14px}
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    body{min-width:320px}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    button:disabled{cursor:not-allowed;opacity:.55}
+    .hidden{display:none!important}
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    .btn{border:0;border-radius:10px;min-height:42px;padding:10px 14px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+    .btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary2)}
+    .btn-secondary{background:#e2e8f0;color:#334155}.btn-success{background:var(--success);color:#fff}.btn-danger{background:var(--danger);color:#fff}.btn-warning{background:#f59e0b;color:#fff}.btn-outline{background:#fff;border:1px solid var(--border);color:#334155}
+    .btn-small{min-height:36px;padding:7px 10px;font-size:13px}
+    .input,select,textarea{width:100%;border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text);padding:11px 12px;outline:none}
+    .input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+    textarea{min-height:90px;resize:vertical}
+    .field{margin-bottom:15px}.field label{display:block;font-size:13px;font-weight:700;margin-bottom:7px}.hint{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.4}
+    .login-screen{min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#0f172a,#172554)}
+    .login-card{width:min(430px,100%);background:#fff;border-radius:22px;padding:30px;box-shadow:0 24px 70px rgba(0,0,0,.25)}
+    .logo{width:62px;height:62px;border-radius:18px;background:#dbeafe;display:flex;align-items:center;justify-content:center;font-size:30px;margin-bottom:16px}.login-card h1{margin:0 0 7px;font-size:27px}.login-card p{margin:0 0 23px;color:var(--muted);line-height:1.5}
+    .app{min-height:100vh;min-height:100dvh}.topbar{height:62px;background:#0f172a;color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 16px;position:sticky;top:0;z-index:60}.brand{display:flex;align-items:center;gap:10px;font-weight:800}.brand-mark{width:34px;height:34px;border-radius:9px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center}.top-user{display:flex;align-items:center;gap:10px}.user-meta{text-align:right;line-height:1.1}.user-name{font-size:13px;font-weight:800}.user-role{font-size:10px;opacity:.7;text-transform:uppercase}
+    .mobile-menu{display:none;border:0;background:#e2e8f0;color:#0f172a;border-radius:9px;width:38px;height:38px;font-size:18px}
+    .layout{display:flex;min-height:calc(100vh - 62px);min-height:calc(100dvh - 62px)}.sidebar{width:235px;flex:0 0 235px;background:#fff;border-right:1px solid var(--border);padding:14px 10px;overflow:auto}.content{flex:1;min-width:0;padding:22px}
+    .nav-title{font-size:10px;font-weight:800;letter-spacing:.08em;color:var(--muted);padding:9px 10px 7px;text-transform:uppercase}.nav-btn{width:100%;border:0;background:transparent;color:#475569;border-radius:10px;min-height:40px;padding:9px 10px;text-align:left;font-weight:700;display:flex;align-items:center;gap:9px;margin-bottom:3px}.nav-btn.active,.nav-btn:hover{background:#eff6ff;color:var(--primary)}
+    .page{max-width:1500px;margin:0 auto}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:18px}.page-head h2{margin:0 0 4px;font-size:25px}.page-head p{margin:0;color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:8px}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:20px}.stat{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:17px;box-shadow:var(--shadow)}.stat small{display:block;color:var(--muted);font-weight:700;font-size:12px;margin-bottom:7px}.stat strong{font-size:28px}
+    .panel{background:#fff;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:18px}.panel-head{padding:15px 17px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:10px}.panel-head h3{margin:0;font-size:16px}.panel-body{padding:16px}
+    .quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.quick{background:#fff;border:1px solid var(--border);border-radius:13px;min-height:102px;padding:16px;text-align:left}.quick:hover{border-color:#93c5fd;background:#f8fbff}.quick-icon{font-size:25px;margin-bottom:6px}.quick strong{display:block}.quick span{display:block;color:var(--muted);font-size:12px;margin-top:4px;line-height:1.4}
+    .period{display:grid;grid-template-columns:1fr 1fr;gap:10px}.register-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}.register-card{--accent:var(--primary);--glow:rgba(37,99,235,.38);border:1px solid var(--border);border-left:6px solid var(--accent);border-radius:12px;padding:14px;min-height:98px;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(255,255,255,.96));cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease}.register-card:hover{transform:translateY(-3px) scale(1.01);box-shadow:0 0 0 2px var(--glow),0 0 24px var(--glow),0 12px 28px rgba(15,23,42,.12);border-color:var(--accent);background:linear-gradient(135deg,rgba(255,255,255,.99),rgba(248,250,252,.99))}.register-code{font-weight:800;margin-bottom:7px;color:var(--text)}.register-meta{font-size:12px;color:var(--muted)}.register-alert{margin-top:7px;font-size:12px;font-weight:800;color:#991b1b;background:#fee2e2;border:1px solid #fecaca;border-radius:7px;padding:4px 7px;display:inline-block}.register-ok{margin-top:7px;font-size:12px;font-weight:800;color:#166534;background:#dcfce7;border:1px solid #bbf7d0;border-radius:7px;padding:4px 7px;display:inline-block}
+    .filters{display:grid;grid-template-columns:2fr 1fr 1fr 1fr auto;gap:9px;margin-bottom:14px}.table-wrap{overflow:auto;-webkit-overflow-scrolling:touch}table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:11px 12px;border-bottom:1px solid var(--border);font-size:13px;text-align:left;vertical-align:middle}th{background:var(--surface2);font-weight:800;white-space:nowrap}.status{display:inline-flex;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;white-space:nowrap}.status-in{background:var(--successBg);color:#166534}.status-out{background:var(--dangerBg);color:#991b1b}.row-actions{display:flex;flex-wrap:wrap;gap:5px}
+    .empty{text-align:center;padding:40px 15px;color:var(--muted)}.muted{color:var(--muted)}.center{text-align:center}
+    .modal-backdrop{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:120;overflow:auto}.modal{width:min(720px,100%);max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);overflow:auto;background:#fff;border-radius:18px;box-shadow:0 28px 80px rgba(0,0,0,.25)}.modal-head{padding:15px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.modal-head h3{margin:0;font-size:17px}.modal-body{padding:18px}.modal-foot{padding:14px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}.close{width:38px;height:38px;border:0;background:#eef2f7;border-radius:9px;font-size:20px}
+    .tabs{display:flex;gap:7px;border-bottom:1px solid var(--border);padding:0 16px}.tab{border:0;background:transparent;padding:12px 9px;font-weight:800;color:var(--muted);border-bottom:3px solid transparent}.tab.active{color:var(--primary);border-color:var(--primary)}
+    .scan-box{border:1px dashed #93c5fd;background:#f8fbff;border-radius:13px;padding:12px}.camera-area{background:#0b1220;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center}.camera-area video{width:100%;height:100%;object-fit:cover;display:block}.camera-placeholder{color:#94a3b8;font-size:14px;text-align:center;padding:20px}.scan-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.scan-result{margin-top:12px;background:#f8fafc;border:1px solid var(--border);border-radius:11px;padding:12px}.scan-result strong{display:block;font-size:16px;margin-bottom:4px}.barcode-area{border:1px solid var(--border);background:#fff;border-radius:11px;padding:16px;display:flex;justify-content:center;min-height:180px;align-items:center}.barcode-meta{text-align:center;margin-top:8px;font-weight:800}
+    .report-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}.report-pill{border:1px solid var(--border);border-radius:11px;padding:12px;background:var(--surface2)}.report-pill small{display:block;color:var(--muted);font-weight:700}.report-pill strong{font-size:22px}
+    .toast-wrap{position:fixed;right:16px;bottom:16px;z-index:300;width:min(380px,calc(100% - 32px));display:flex;flex-direction:column;gap:8px}.toast{background:#0f172a;color:#fff;border-radius:11px;padding:12px 14px;box-shadow:var(--shadow);font-size:13px}.toast.success{background:#166534}.toast.error{background:#991b1b}.toast.warn{background:#92400e}
+    .loading{position:fixed;inset:0;background:rgba(255,255,255,.7);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:280}.loading-card{background:#fff;padding:18px 22px;border-radius:12px;box-shadow:var(--shadow);font-weight:800}
+    #bootError{font-size:12px;line-height:1.4;margin-top:10px;display:none}
+    @media (max-width:1100px){.register-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.filters{grid-template-columns:1fr 1fr 1fr}.quick-grid{grid-template-columns:1fr}}
+    @media (max-width:780px){.mobile-menu{display:block}.user-meta{display:none}.sidebar{position:fixed;top:62px;bottom:0;left:-250px;width:250px;z-index:100;transition:left .18s ease;box-shadow:10px 0 35px rgba(0,0,0,.12)}.sidebar.open{left:0}.content{padding:15px}.page-head{flex-direction:column}.actions{width:100%}.actions .btn{flex:1}.period{grid-template-columns:1fr}.register-grid{grid-template-columns:1fr 1fr}.filters{grid-template-columns:1fr 1fr}.quick-grid{grid-template-columns:1fr}.report-summary{grid-template-columns:1fr 1fr}}
+    @media (max-width:520px){.topbar{padding:0 10px}.stats{grid-template-columns:1fr 1fr;gap:9px}.stat{padding:13px}.stat strong{font-size:23px}.register-grid{grid-template-columns:1fr}.filters{grid-template-columns:1fr}.modal-backdrop{padding:8px}.modal{border-radius:14px}.modal-body{padding:14px}.modal-foot{padding:12px 14px}.btn{min-height:44px}.input,select,textarea{font-size:16px}}
+
+    .camera-area{position:relative}.camera-area::after{content:"";position:absolute;left:22%;right:22%;top:24%;height:2px;background:rgba(59,130,246,.98);box-shadow:0 0 12px rgba(59,130,246,.9);pointer-events:none;opacity:0}.camera-area.scanning-active::after{opacity:1;animation:scanBeam 2.2s ease-in-out infinite}.camera-area video{background:#0b1220}.scan-frame{position:absolute;left:22%;right:22%;top:24%;bottom:24%;border:2px solid rgba(255,255,255,.72);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.14);pointer-events:none;opacity:.45}.camera-area.scanning-active .scan-frame{opacity:.92}.scanner-status{margin-top:9px;padding:9px 11px;border-radius:10px;background:#eef6ff;color:#1e3a8a;font-size:12px;font-weight:800}.scanner-status.success{background:#dcfce7;color:#166534}.scanner-status.warn{background:#fef3c7;color:#92400e}.scanner-status.error{background:#fee2e2;color:#991b1b}@keyframes scanBeam{0%{top:24%}50%{top:72%}100%{top:24%}}
+    @media (max-width:520px){#scanModal .modal{width:100%;max-height:calc(100dvh - 16px);margin:8px 0}#scanModal .modal-body{padding:12px}.camera-area{aspect-ratio:3/4}.scan-controls .btn{flex:1;min-width:0}.tabs{overflow-x:auto;white-space:nowrap}}
+    @media print{
+      *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+      body.printing-report{background:#fff!important}
+      body.printing-report > *:not(#printRoot){display:none!important}
+      body.printing-report #printRoot{display:block!important;position:static!important;width:100%!important;min-height:100%!important;background:#fff!important}
+      body.printing-report .print-report{display:block!important}
+      @page{size:A4 landscape;margin:10mm}
+      .print-summary{break-inside:avoid}
+    }
+    #printRoot{display:none}.print-report{font-family:Arial,Helvetica,sans-serif;color:#0f172a;background:#fff}.print-report h1{font-size:20px;margin:0 0 5px}.print-meta{font-size:12px;color:#475569;margin-bottom:12px}.print-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.print-pill{border:1px solid #94a3b8;border-radius:8px;padding:8px 10px;background:#e2e8f0;text-align:center}.print-pill span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;color:#334155}.print-pill strong{display:block;font-size:18px;margin-top:2px}.print-pill.print-green{background:#dcfce7}.print-pill.print-red{background:#fee2e2}.print-table{width:100%;border-collapse:collapse;min-width:0}.print-table th,.print-table td{border:1px solid #64748b;padding:7px 8px;font-size:10pt;text-align:center;vertical-align:middle}.print-table th{background:#bfdbfe!important;color:#0f172a!important;font-weight:800}.print-table tr{break-inside:avoid}.print-table thead{display:table-header-group}
+    .print-only{display:none}
+  </style>
+</head>
+<body>
+
+<section id="loginScreen" class="login-screen">
+  <div class="login-card">
+    <div class="logo">📄</div>
+    <h1>PO Tracking</h1>
+    <p>Sistem pencatatan pengiriman dan penerimaan berkas Purchase Order.</p>
+    <form id="loginForm">
+      <div class="field"><label for="loginEmail">Email</label><input id="loginEmail" class="input" type="email" autocomplete="username" placeholder="email@perusahaan.com" required></div>
+      <div class="field"><label for="loginPassword">Password</label><input id="loginPassword" class="input" type="password" autocomplete="current-password" placeholder="Password" required></div>
+      <button id="loginBtn" class="btn btn-primary" style="width:100%" type="submit">🔐 Login</button>
+      <div id="bootError"></div>
+    </form>
+  </div>
+</section>
+
+<section id="appScreen" class="app hidden">
+  <header class="topbar">
+    <div style="display:flex;align-items:center;gap:9px">
+      <button id="mobileMenuBtn" class="mobile-menu" type="button" aria-label="Buka menu">☰</button>
+      <div class="brand"><div class="brand-mark">📄</div><span>PO TRACKING</span></div>
+    </div>
+    <div class="top-user"><div class="user-meta"><div id="topUserName" class="user-name">-</div><div id="topUserRole" class="user-role">-</div></div><button id="logoutBtn" type="button" class="btn btn-secondary btn-small">Logout</button></div>
+  </header>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="nav-title">Menu</div>
+      <button class="nav-btn active" data-page="dashboard" type="button">🏠 Dashboard</button>
+      <button class="nav-btn" data-page="all-po" type="button">📋 Semua PO</button>
+      <button class="nav-btn" data-page="report" type="button">📊 Laporan</button>
+      <button class="nav-btn admin-only hidden" data-page="audit" type="button">📜 Audit Log</button>
+      <button class="nav-btn admin-only hidden" data-page="users" type="button">👥 Pengguna</button>
+      <div class="nav-title">Periode</div>
+      <div class="field" style="padding:0 6px"><label for="yearSelect">Tahun</label><select id="yearSelect"></select></div>
+      <div class="field" style="padding:0 6px"><label for="monthSelect">Bulan</label><select id="monthSelect"></select></div>
+      <div class="nav-title">Register</div>
+      <div id="registerNav"></div>
+    </aside>
+    <main class="content">
+
+      <section id="page-dashboard" class="page">
+        <div class="page-head"><div><h2>Dashboard</h2><p>Ringkasan pencatatan Purchase Order.</p></div><div class="actions"><button id="dashboardAdd" class="btn btn-primary" type="button">＋ Input PO</button></div></div>
+        <div class="stats">
+          <div class="stat"><small>PO PERIODE TERPILIH</small><strong id="statTotal">0</strong></div>
+          <div class="stat"><small>SUDAH KEMBALI</small><strong id="statReturned">0</strong></div>
+          <div class="stat"><small>BELUM KEMBALI</small><strong id="statOutstanding">0</strong></div>
+          <div class="stat"><small>DIKIRIM HARI INI</small><strong id="statToday">0</strong></div>
+        </div>
+        <div class="panel"><div class="panel-head"><h3>Quick Action</h3><span id="periodLabel" class="muted" style="font-size:12px"></span></div><div class="panel-body"><div class="quick-grid">
+          <button id="voiceQuick" class="quick" type="button"><div class="quick-icon">🎙️</div><strong>Voice Command</strong><span>“PO 129, 193, 194 masuk”</span></button>
+          <button id="scanQuick" class="quick" type="button"><div class="quick-icon">📷</div><strong>Scan PO</strong><span>Scan barcode dengan kamera atau input hasil scan</span></button>
+          <button id="manualQuick" class="quick" type="button"><div class="quick-icon">➕</div><strong>Input Manual</strong><span>Tambahkan pencatatan PO baru</span></button>
+        </div></div></div>
+        <div class="panel"><div class="panel-head"><h3 id="registerSectionTitle">Register</h3><span class="muted" style="font-size:12px">15 Register Group</span></div><div class="panel-body"><div id="registerGrid" class="register-grid"></div></div></div>
+      </section>
+
+      <section id="page-register" class="page hidden">
+        <div class="page-head"><div><h2 id="registerTitle">BZOA26-A</h2><p>Register Pengiriman &amp; Penerimaan PO</p></div><div class="actions"><button id="registerBack" class="btn btn-secondary" type="button">← Kembali</button><button id="registerAdd" class="btn btn-primary" type="button">＋ Tambah PO</button></div></div>
+        <div class="panel"><div class="panel-body"><div class="filters">
+          <input id="regSearch" class="input" type="search" placeholder="🔎 Cari No PO / Customer / Keterangan">
+          <input id="regFrom" class="input" type="date">
+          <input id="regTo" class="input" type="date">
+          <select id="regStatus"><option value="ALL">Semua Status</option><option value="BELUM_KEMBALI">🔴 Belum Kembali</option><option value="SUDAH_KEMBALI">🟢 Sudah Kembali</option></select>
+          <button id="regReset" class="btn btn-secondary" type="button">Reset</button>
+        </div><div id="registerTable" class="table-wrap"></div></div></div>
+      </section>
+
+      <section id="page-all-po" class="page hidden">
+        <div class="page-head"><div><h2>Semua PO</h2><p>Pencarian seluruh periode.</p></div></div>
+        <div class="panel"><div class="panel-body"><div class="filters">
+          <input id="allSearch" class="input" type="search" placeholder="🔎 Cari No PO / Customer / Register">
+          <input id="allFrom" class="input" type="date"><input id="allTo" class="input" type="date"><select id="allStatus"><option value="ALL">Semua Status</option><option value="BELUM_KEMBALI">🔴 Belum Kembali</option><option value="SUDAH_KEMBALI">🟢 Sudah Kembali</option></select><button id="allReset" class="btn btn-secondary" type="button">Reset</button>
+        </div><div id="allTable" class="table-wrap"></div></div></div>
+      </section>
+
+      <section id="page-report" class="page hidden">
+        <div class="page-head"><div><h2>Laporan PO</h2><p>Filter, cetak, dan export data.</p></div><div class="actions"><button id="reportPrint" class="btn btn-primary" type="button">🖨️ Print</button><button id="reportExport" class="btn btn-outline admin-only hidden" type="button">📊 Export Excel</button></div></div>
+        <div class="panel"><div class="panel-body"><div class="filters">
+          <select id="reportYear"></select><select id="reportMonth"><option value="ALL">Semua Bulan</option></select><select id="reportGroup"><option value="ALL">Semua Register</option></select><select id="reportStatus"><option value="ALL">Semua Status</option><option value="BELUM_KEMBALI">Belum Kembali</option><option value="SUDAH_KEMBALI">Sudah Kembali</option></select><button id="reportReset" class="btn btn-secondary" type="button">Reset</button>
+        </div><div class="filters"><input id="reportFrom" class="input" type="date"><input id="reportTo" class="input" type="date"><input id="reportSearch" class="input" type="search" placeholder="Cari No PO / Customer"><div></div><div></div></div>
+          <div class="report-summary"><div class="report-pill"><small>Total</small><strong id="reportTotal">0</strong></div><div class="report-pill"><small>Sudah Kembali</small><strong id="reportReturned">0</strong></div><div class="report-pill"><small>Belum Kembali</small><strong id="reportOutstanding">0</strong></div></div>
+          <div id="reportTable" class="table-wrap"></div>
+        </div></div>
+      </section>
+
+      <section id="page-audit" class="page hidden"><div class="page-head"><div><h2>Audit Log</h2><p>Riwayat aktivitas pengguna.</p></div></div><div class="panel"><div id="auditTable" class="table-wrap"></div></div></section>
+
+      <section id="page-users" class="page hidden"><div class="page-head"><div><h2>Pengguna</h2><p>Kelola status akses pengguna.</p></div></div><div class="panel"><div class="panel-body"><div class="hint" style="margin-bottom:12px">Pembuatan akun email/password tetap dilakukan di Firebase Authentication. Di sini Admin mengatur profil role dan status aktif.</div><div id="usersTable" class="table-wrap"></div></div></div></section>
+
+    </main>
+  </div>
+</section>
+
+<div id="poModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><h3 id="poModalTitle">Tambah PO</h3><button class="close" id="poClose" type="button">×</button></div><form id="poForm"><div class="modal-body">
+  <div class="field"><label for="poRegister">Register</label><select id="poRegister" required></select></div>
+  <div class="field"><label for="poSendDate">Tgl Kirim *</label><input id="poSendDate" class="input" type="date" required></div>
+  <div class="field"><label for="poReturnDate">Tgl Kembali</label><input id="poReturnDate" class="input" type="date"><div class="hint">Kosongkan bila berkas belum kembali.</div></div>
+  <div class="field"><label for="poNo">No PO *</label><input id="poNo" class="input" type="text" placeholder="Contoh: BZOA26A001" autocomplete="off" required></div>
+  <div class="field"><label for="poCustomer">Nama Customer *</label><input id="poCustomer" class="input" type="text" required></div>
+  <div class="field"><label for="poNote">Keterangan</label><textarea id="poNote" placeholder="Catatan..."></textarea></div>
+</div><div class="modal-foot"><button id="poCancel" class="btn btn-secondary" type="button">Batal</button><button id="poSave" class="btn btn-primary" type="submit">Simpan</button></div></form></div></div>
+
+<div id="quickModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><h3 id="quickTitle">Quick Action</h3><button id="quickClose" class="close" type="button">×</button></div><div class="modal-body"><div class="field"><label for="quickPo">No PO</label><input id="quickPo" class="input" type="text" placeholder="BZOA26A001 atau 001" autocomplete="off"></div><div id="quickHint" class="hint"></div></div><div class="modal-foot"><button id="quickCancel" class="btn btn-secondary" type="button">Batal</button><button id="quickRun" class="btn btn-primary" type="button">Proses</button></div></div></div>
+
+<div id="confirmModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><h3 id="confirmTitle">Konfirmasi</h3><button id="confirmClose" class="close" type="button">×</button></div><div id="confirmBody" class="modal-body"></div><div class="modal-foot"><button id="confirmCancel" class="btn btn-secondary" type="button">Batal</button><button id="confirmRun" class="btn btn-primary" type="button">Konfirmasi</button></div></div></div>
+
+<div id="voiceModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><h3>🎙️ Voice Command</h3><button id="voiceClose" class="close" type="button">×</button></div><div class="tabs"><button id="voiceTabMic" class="tab active" type="button">🎙️ Suara</button><button id="voiceTabType" class="tab" type="button">⌨️ Ketik</button></div><div class="modal-body">
+  <div id="voiceMicPane"><div style="display:grid;gap:10px"><button id="voiceStart" class="btn btn-primary" type="button">🎙️ Mulai Mendengarkan</button><div id="voiceState" class="hint">Contoh: “PO 129, 193, 194 masuk”</div><div id="voiceTranscript" class="scan-result"><div class="muted">Hasil suara akan muncul di sini.</div></div></div></div>
+  <div id="voiceTypePane" class="hidden"><div class="field"><label for="voiceInput">Perintah</label><input id="voiceInput" class="input" type="text" placeholder="PO 129, 193, 194 masuk"></div><button id="voiceAnalyze" class="btn btn-primary" type="button">Analisa Perintah</button></div>
+  <div id="voiceResult" class="scan-result hidden" style="margin-top:14px"></div>
+</div><div class="modal-foot"><button id="voiceCancel" class="btn btn-secondary" type="button">Tutup</button><button id="voiceProcess" class="btn btn-success hidden" type="button">✓ Proses Batch</button></div></div></div>
+
+<div id="scanModal" class="modal-backdrop hidden"><div class="modal"><div class="modal-head"><h3>📷 Scan PO</h3><button id="scanClose" class="close" type="button">×</button></div><div class="tabs"><button id="scanTab" class="tab active" type="button">📷 Scan</button><button id="genTab" class="tab" type="button">🏷️ Generate Barcode</button></div>
+  <div id="scanPane" class="modal-body"><div class="scan-box"><div id="cameraArea" class="camera-area"><div class="camera-placeholder">Kamera belum aktif.<br>Tekan “Buka Kamera”.</div><div class="scan-frame" aria-hidden="true"></div><video id="cameraVideo" playsinline muted autoplay class="hidden"></video></div><div id="scannerStatus" class="scanner-status info">🔎 Kamera belum aktif.</div><div class="scan-controls"><button id="cameraStart" class="btn btn-primary" type="button">📷 Buka Kamera</button><button id="cameraStop" class="btn btn-secondary" type="button" disabled>⏹ Stop Kamera</button></div><div class="field" style="margin-top:12px;margin-bottom:0"><label for="scanInput">Hasil Scan / No PO</label><input id="scanInput" class="input" type="text" placeholder="BZOA26A001 atau PO 001"></div><div class="hint">Scanner mencoba mode otomatis dan mode kompatibilitas. Hasil scan yang berhasil akan masuk otomatis.</div></div><div id="scanResult" class="scan-result hidden"></div></div>
+  <div id="genPane" class="modal-body hidden"><div class="field"><label for="genPoInput">No PO</label><input id="genPoInput" class="input" type="text" placeholder="BZOA26A001"></div><div class="actions"><button id="genFind" class="btn btn-outline" type="button">🔎 Cari PO</button><button id="genMake" class="btn btn-primary" type="button">🏷️ Generate</button></div><div id="genInfo" class="hint" style="margin:10px 0"></div><div id="barcodeArea" class="barcode-area"><span class="muted">Barcode akan tampil di sini.</span></div><div id="barcodeMeta" class="barcode-meta"></div><div class="actions" style="justify-content:center;margin-top:10px"><button id="barcodePrint" class="btn btn-outline" type="button" disabled>🖨️ Print</button><button id="barcodeSave" class="btn btn-secondary" type="button" disabled>⬇️ Simpan SVG</button></div></div>
+  <div class="modal-foot"><button id="scanCancel" class="btn btn-secondary" type="button">Tutup</button><button id="scanSearch" class="btn btn-primary" type="button">Cari PO</button></div>
+</div></div>
+
+<div id="toastWrap" class="toast-wrap"></div>
+<div id="loading" class="loading hidden"><div class="loading-card">⏳ Memproses...</div></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

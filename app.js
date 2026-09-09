@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const APP_VERSION = "1.13.0-historical-date";
+const APP_VERSION = "1.14.0-idempotent-dedup";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhzrMhSPA_S8keOjU6QL2Tath3jFBY9Vs",
@@ -40,7 +40,8 @@ let state = {
   barcodeSvg: "",
   barcodePO: "",
   importPreview: null,
-  xlsxLibraryPromise: null
+  xlsxLibraryPromise: null,
+  duplicateGroups: []
 };
 
 const $ = (id) => document.getElementById(id);
@@ -1336,6 +1337,77 @@ function printReport(){
 }
 
 
+function getImportErrorCategories(errors){
+  const counts=new Map();
+  (errors||[]).forEach(item=>{
+    const reason=String(item.reason||"Tidak diketahui");
+    const parts=reason.split("; ").map(x=>x.trim()).filter(Boolean);
+    if(!parts.length)parts.push("Tidak diketahui");
+    parts.forEach(part=>counts.set(part,(counts.get(part)||0)+1));
+  });
+  return [...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+}
+function importDiagnosticsKey(){return `poTrackingImportDiagnostics:${state.user?.uid||"anonymous"}`;}
+function saveImportDiagnostics(){
+  try{
+    const p=state.importPreview;
+    if(!p){sessionStorage.removeItem(importDiagnosticsKey());return;}
+    sessionStorage.setItem(importDiagnosticsKey(),JSON.stringify(p));
+  }catch(err){console.warn("Gagal menyimpan diagnostics import",err);}
+}
+function loadImportDiagnostics(){
+  try{
+    const raw=sessionStorage.getItem(importDiagnosticsKey());
+    if(!raw)return;
+    const p=JSON.parse(raw);
+    if(p&&Array.isArray(p.ready)&&Array.isArray(p.duplicates)&&Array.isArray(p.errors)){
+      state.importPreview=p;
+      renderImportPreview();
+    }
+  }catch(err){console.warn("Gagal memulihkan diagnostics import",err);}
+}
+async function exportImportRows(rows,filename,sheetName){
+  if(!rows?.length){toast("Tidak ada data untuk diexport.","warn");return;}
+  try{
+    showLoading(true);
+    const XLSX=await loadXLSXLibrary();
+    const wb=XLSX.utils.book_new();
+    const data=rows.map(r=>({
+      Baris:r.rowNumber||"",
+      Status:r.reason?"Error":"Siap Import",
+      Register:r.registerCode||"",
+      "Tgl Kirim":r.tglKirim||"",
+      "Tgl Kembali":r.tglKembali||"",
+      "No PO":r.noPO||"",
+      "Nama Customer":r.namaCustomer||"",
+      Keterangan:r.keterangan||"",
+      "Alasan/Error":r.reason||""
+    }));
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),sheetName||"Data");
+    XLSX.writeFile(wb,filename);
+    toast(`${rows.length} baris berhasil diexport.`,"success");
+  }catch(err){console.error(err);toast("Gagal membuat file Excel diagnostics.","error");}
+  finally{showLoading(false)}
+}
+function renderImportDiagnostics(p){
+  const summary=$("importDiagnosticsSummary");
+  const errorTable=$("importErrorTable");
+  const errorBtn=$("downloadImportErrorsBtn");
+  const readyBtn=$("downloadImportReadyBtn");
+  if(!summary||!errorTable)return;
+  if(!p){summary.innerHTML="";errorTable.innerHTML="";errorTable.classList.add("hidden");if(errorBtn)errorBtn.disabled=true;if(readyBtn)readyBtn.disabled=true;return;}
+  const cats=getImportErrorCategories(p.errors);
+  let html=`<div><strong>Diagnostik Import</strong> — ${p.errors.length} baris error tersimpan selama sesi ini. ${p.errors.length?"Perbaiki Excel lalu Preview ulang; data error tidak ikut di-import.":"Tidak ada error."}</div>`;
+  if(cats.length){html+='<div class="import-diagnostics-grid">';cats.forEach(([name,count])=>{html+=`<div class="import-diagnostic-item"><strong>${count}×</strong> ${escapeHTML(name)}</div>`});html+='</div>';}
+  summary.innerHTML=html;
+  if(errorBtn)errorBtn.disabled=!p.errors.length;
+  if(readyBtn)readyBtn.disabled=!p.ready.length;
+  if(p.errors.length){
+    let eh=`<div class="import-error-table-head">❌ Daftar semua ${p.errors.length} error import <span class="muted">— seluruh baris error ditampilkan</span></div><table><thead><tr><th>Baris</th><th>No PO</th><th>Register</th><th>Tgl Kirim</th><th>Tgl Kembali</th><th>Customer</th><th>Keterangan</th><th>Alasan Error</th></tr></thead><tbody>`;
+    p.errors.forEach(r=>{eh+=`<tr><td>${r.rowNumber}</td><td><strong>${escapeHTML(r.noPO||"")}</strong></td><td>${escapeHTML(r.registerCode||"-")}</td><td>${escapeHTML(formatDate(r.tglKirim))}</td><td>${escapeHTML(formatDate(r.tglKembali))}</td><td>${escapeHTML(r.namaCustomer||"")}</td><td>${escapeHTML(r.keterangan||"")}</td><td class="import-error">${escapeHTML(r.reason||"Tidak diketahui")}</td></tr>`});
+    eh+='</tbody></table>';errorTable.innerHTML=eh;errorTable.classList.remove("hidden");
+  }else{errorTable.innerHTML="";errorTable.classList.add("hidden");}
+}
 function importRowCellClass(status){return status==="ready"?"import-ok":status==="duplicate"?"import-skip":"import-error";}
 function renderImportPreview(){
   const p=state.importPreview;
@@ -1354,7 +1426,8 @@ function renderImportPreview(){
     html+='</tbody></table>';$("importPreviewTable").innerHTML=html;
   }
   $("dataImportBtn").disabled=!(p.ready.length>0);
-  $("dataImportBtn").textContent = p.errors.length ? `📥 Import ${p.ready.length} Data Valid` : "📥 Import Data";
+  $("dataImportBtn").textContent=p.ready.length?`📥 Import ${p.ready.length} Data Valid`:'📥 Import Data';
+  renderImportDiagnostics(p);
   const hint=$("importHistoricalHint");
   if(hint){
     hint.textContent=p.missingSendCount?`${p.missingSendCount} baris tidak memiliki Tgl Kirim. Data tetap dapat di-import tanpa mengisi tanggal palsu; status akan mengikuti Tgl Kembali jika tersedia.`:"";
@@ -1416,20 +1489,17 @@ async function previewImportFile(){
       if(rowError.length){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo?.code||"",reason:rowError.join("; ")});return;}
       const unique=normalizePO(noPO);
       if(!unique){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"No PO tidak dapat dinormalisasi"});return;}
-      // Keep Firestore's po_documents/po_unique invariant: noPO and uniqueKey must be identical.
-      // Structured PO codes (e.g. BZOA23A001) remain unchanged; shorthand numeric/PO values are
-      // canonicalized consistently (e.g. 001 -> PO-00001) just like manual input.
-      const canonicalNoPO=unique;
-      if(seen.has(unique)){duplicates.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"Duplikat dalam file import"});return;}
+      if(seen.has(unique)){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"Duplikat dalam file import"});return;}
       seen.add(unique);
       const existing=state.allPOs.find(po=>normalizePO(po.noPO)===unique);
-      if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
+      if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
       // The precedence used for historical rows is: Register/No PO, then Tgl Kirim, then Tgl Kembali.
       const actualPeriodSource=suppliedRegister?"Register":(noPO && inferRegisterFromPO(noPO,referenceDate)?"No PO":(tglKirim?"Tgl Kirim":"Tgl Kembali"));
       if(!tglKirim)missingSendCount++;
-      ready.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:canonicalNoPO,periodSource:actualPeriodSource});
+      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique,periodSource:actualPeriodSource});
     });
     state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,missingSendCount,createdAt:Date.now()};
+    saveImportDiagnostics();
     renderImportPreview();
     if(errors.length){
       toast(`Preview selesai: ${ready.length} siap, ${duplicates.length} duplikat, ${errors.length} error.`,"warn");
@@ -1437,39 +1507,145 @@ async function previewImportFile(){
       const historyNote=missingSendCount?` (${missingSendCount} tanpa Tgl Kirim, tetap aman)`:"";
       toast(`Preview selesai: ${ready.length} data siap di-import${historyNote}.`,"success");
     }
-  }catch(err){console.error(err);toast(err?.message||"Gagal membaca file Excel.","error");state.importPreview=null;renderImportPreview();}
+  }catch(err){console.error(err);toast(err?.message||"Gagal membaca file Excel.","error");state.importPreview=null;saveImportDiagnostics();renderImportPreview();}
   finally{showLoading(false)}
+}
+async function findExistingByUniqueKey(uniqueKey){
+  try{
+    const pointerSnap=await getDoc(doc(db,"po_unique",uniqueKey));
+    if(pointerSnap.exists()){
+      const pdata=pointerSnap.data()||{};
+      return {kind:"index",poId:String(pdata.poId||""),data:pdata};
+    }
+  }catch(err){console.warn("Gagal membaca indeks po_unique",uniqueKey,err);throw err;}
+  const matches=state.allPOs.filter(po=>normalizePO(po.noPO)===uniqueKey);
+  if(matches.length){
+    const canonical=pickCanonicalFromLocal(matches);
+    return {kind:"local",poId:canonical.id,data:{noPO:uniqueKey,poId:canonical.id}};
+  }
+  return null;
+}
+function pickCanonicalFromLocal(matches){
+  return [...matches].sort((a,b)=>{
+    const ar=a.tglKembali?1:0, br=b.tglKembali?1:0;
+    if(ar!==br)return br-ar;
+    const at=a.createdAt?.toMillis?a.createdAt.toMillis():Number.MAX_SAFE_INTEGER;
+    const bt=b.createdAt?.toMillis?b.createdAt.toMillis():Number.MAX_SAFE_INTEGER;
+    if(at!==bt)return at-bt;
+    return String(a.id||"").localeCompare(String(b.id||""));
+  })[0];
 }
 async function importPreviewData(){
   if(!isAdmin())return;
   const p=state.importPreview;
   if(!p || !p.ready.length){toast("Tidak ada data valid untuk di-import.","warn");return;}
-  const warning = p.errors.length ? `\n\nPerhatian: ${p.errors.length} baris error akan dilewati dan TIDAK akan di-import. Perbaiki baris tersebut di Excel jika ingin memasukkannya nanti.` : "";
-  if(!confirm(`Import ${p.ready.length} PO valid dari ${p.fileName}? Duplikat sudah dilewati dan tidak akan menimpa data yang ada.${warning}`))return;
+  const errorNote=p.errors.length?` ${p.errors.length} baris error akan dilewati.`:"";
+  if(!confirm(`Import maksimal ${p.ready.length} data valid dari ${p.fileName}?${errorNote} Data yang sudah ada di Firestore akan otomatis dilewati sehingga aman bila proses diulang.`))return;
   try{
-    showLoading(true);$("dataImportBtn").disabled=true;$("importProgressWrap").classList.remove("hidden");
-    const chunkSize=4;const total=p.ready.length;let done=0;
+    showLoading(true);
+    $("dataImportBtn").disabled=true;
+    $("importProgressWrap").classList.remove("hidden");
+    const chunkSize=4;
+    const total=p.ready.length;
+    let processed=0, imported=0, skipped=0, repaired=0;
     for(let start=0;start<total;start+=chunkSize){
-      const chunk=p.ready.slice(start,start+chunkSize);const batch=writeBatch(db);
-      chunk.forEach(item=>{
+      const chunk=p.ready.slice(start,start+chunkSize);
+      const batch=writeBatch(db);
+      let writes=0;
+      const newItems=[];
+      for(const item of chunk){
+        const found=await findExistingByUniqueKey(item.uniqueKey);
+        if(found){
+          skipped++;
+          if(found.kind==="local" && found.poId){
+            batch.set(doc(db,"po_unique",item.uniqueKey),{noPO:item.uniqueKey,poId:found.poId,createdAt:serverTimestamp(),createdBy:state.user.uid});
+            writes++; repaired++;
+          }
+          continue;
+        }
+        newItems.push(item);
+      }
+      for(const item of newItems){
         const ref=doc(collection(db,"po_documents"));
         batch.set(ref,{registerGroup:item.registerGroup,year:item.year,month:item.month,registerCode:item.registerCode,tglKirim:item.tglKirim,tglKembali:item.tglKembali||null,noPO:item.noPO,uniqueKey:item.uniqueKey,namaCustomer:item.namaCustomer,keterangan:item.keterangan,status:item.tglKembali?"SUDAH_KEMBALI":"BELUM_KEMBALI",createdAt:serverTimestamp(),createdBy:state.user.uid,updatedAt:serverTimestamp(),updatedBy:state.user.uid});
-        batch.set(doc(db,"po_unique",item.uniqueKey),{noPO:item.noPO,poId:ref.id,createdAt:serverTimestamp(),createdBy:state.user.uid});
-      });
-      await batch.commit();
-      done+=chunk.length;const pct=Math.round(done/total*100);$("importProgressBar").style.width=`${pct}%`;$("importProgressText").textContent=`${done} / ${total} PO (${pct}%)`;
+        batch.set(doc(db,"po_unique",item.uniqueKey),{noPO:item.uniqueKey,poId:ref.id,createdAt:serverTimestamp(),createdBy:state.user.uid});
+        writes+=2; imported++;
+      }
+      if(writes) await batch.commit();
+      processed=Math.min(start+chunk.length,total);
+      const pct=Math.round(processed/total*100);
+      $("importProgressBar").style.width=`${pct}%`;
+      $("importProgressText").textContent=`${processed} / ${total} diperiksa (${pct}%) • Baru ${imported} • Dilewati ${skipped}`;
     }
-    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati, ${p.errors.length} baris error dilewati${p.missingSendCount?`, ${p.missingSendCount} tanpa Tgl Kirim`:""}.`);
-    toast(p.errors.length ? `${p.ready.length} PO berhasil di-import. ${p.errors.length} baris error dilewati.` : `${p.ready.length} PO berhasil di-import.`, p.errors.length ? "warn" : "success");
-    state.importPreview=null;renderImportPreview();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");await refresh();await loadImportHistory();
+    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${imported} PO baru, ${skipped} sudah ada/dilewati, ${repaired} indeks po_unique diperbaiki${p.errors.length?`, ${p.errors.length} baris error tidak di-import`:""}.`);
+    toast(`Import selesai: ${imported} baru, ${skipped} dilewati${p.errors.length?`, ${p.errors.length} error tidak di-import`:""}.`,"success");
+    state.importPreview=null;saveImportDiagnostics();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");renderImportPreview();await refresh();await loadImportHistory();await scanDuplicateGroups();
   }catch(err){
-    console.error("Import Firestore error:",err);
-    const code=String(err?.code||"");
-    const detail=code?` (${code})`:"";
-    toast(`Import gagal${detail}: ${err?.message||"Periksa Firestore Rules dan koneksi."}`,"error");
+    console.error(err);
+    toast(`Import berhenti: ${err?.code||"error"} — ${err?.message||"gagal menulis Firestore"}. Batch yang sudah committed tetap aman; jalankan ulang untuk melanjutkan tanpa menggandakan PO.` ,"error");
+  }finally{showLoading(false);$("dataImportBtn").disabled=!(state.importPreview?.ready?.length>0);}
+}
+function canonicalScore(po){
+  let score=0;
+  if(po.tglKembali)score+=100;
+  if(po.tglKirim)score+=20;
+  if(po.namaCustomer)score+=5;
+  if(po.keterangan)score+=1;
+  return score;
+}
+async function scanDuplicateGroups(){
+  if(!isAdmin())return [];
+  const map=new Map();
+  for(const po of state.allPOs){
+    const key=normalizePO(po.noPO);
+    if(!key)continue;
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(po);
   }
+  const groups=[...map.entries()].filter(([,arr])=>arr.length>1).map(([key,items])=>({key,items}));
+  groups.sort((a,b)=>b.items.length-a.items.length||a.key.localeCompare(b.key));
+  state.duplicateGroups=groups;
+  renderDuplicateAudit(groups);
+  return groups;
+}
+function duplicateCreatedTime(po){return po.createdAt?.toMillis?po.createdAt.toMillis():Number.MAX_SAFE_INTEGER;}
+function chooseCanonicalForGroup(items){
+  return [...items].sort((a,b)=>canonicalScore(b)-canonicalScore(a)||duplicateCreatedTime(a)-duplicateCreatedTime(b)||String(a.id).localeCompare(String(b.id)))[0];
+}
+function renderDuplicateAudit(groups=state.duplicateGroups||[]){
+  const wrap=$("duplicateAuditPanel"); const body=$("duplicateAuditTable");
+  if(!wrap||!body)return;
+  wrap.classList.remove("hidden");
+  if(!groups.length){body.innerHTML='<div class="empty">✅ Tidak ditemukan duplikat No PO berdasarkan data yang saat ini dimuat.</div>';return;}
+  let html=`<div class="hint" style="margin-bottom:10px">Ditemukan <strong>${groups.length}</strong> No PO yang memiliki lebih dari satu dokumen. Sistem menyarankan mempertahankan data terbaik (prioritas Tgl Kembali, lalu Tgl Kirim, lalu waktu dibuat). Tidak ada penghapusan otomatis sebelum Anda menekan tombol tindakan.</div><table><thead><tr><th>No PO</th><th>Jumlah</th><th>Dokumen</th><th>Rekomendasi</th><th>Aksi</th></tr></thead><tbody>`;
+  groups.forEach(g=>{
+    const canonical=chooseCanonicalForGroup(g.items);
+    const docs=g.items.map(po=>`${escapeHTML(po.id)}${po.id===canonical.id?' ⭐':''}`).join('<br>');
+    html+=`<tr><td><strong>${escapeHTML(g.key)}</strong></td><td>${g.items.length}</td><td>${docs}</td><td>${escapeHTML(canonical.id)} <span class="muted">(dipertahankan)</span></td><td><button type="button" class="btn btn-danger btn-small" data-dedupe-key="${escapeHTML(g.key)}">Pertahankan & Hapus Duplikat</button></td></tr>`;
+  });
+  html+='</tbody></table>';body.innerHTML=html;
+  body.querySelectorAll('[data-dedupe-key]').forEach(btn=>btn.addEventListener('click',()=>cleanupDuplicateGroup(btn.dataset.dedupeKey)));
+}
+async function cleanupDuplicateGroup(uniqueKey){
+  if(!isAdmin())return;
+  const group=(state.duplicateGroups||[]).find(g=>g.key===uniqueKey); if(!group)return;
+  const canonical=chooseCanonicalForGroup(group.items);
+  const duplicates=group.items.filter(po=>po.id!==canonical.id);
+  if(!duplicates.length){toast("Tidak ada dokumen duplikat yang perlu dihapus.","warn");return;}
+  if(!confirm(`No PO ${uniqueKey} memiliki ${group.items.length} dokumen. Pertahankan ${canonical.id} dan hapus ${duplicates.length} duplikat?`))return;
+  try{
+    showLoading(true);
+    const batch=writeBatch(db);
+    batch.set(doc(db,"po_unique",uniqueKey),{noPO:uniqueKey,poId:canonical.id,updatedAt:serverTimestamp(),updatedBy:state.user.uid});
+    for(const po of duplicates) batch.delete(doc(db,"po_documents",po.id));
+    await batch.commit();
+    await writeAudit("DEDUP_PO",uniqueKey,canonical.registerCode||"",`Membersihkan ${duplicates.length} duplikat; dipertahankan ${canonical.id}.`);
+    toast(`${uniqueKey}: ${duplicates.length} duplikat dihapus.`,"success");
+    await refresh(); await scanDuplicateGroups();
+  }catch(err){console.error(err);toast(`Gagal membersihkan ${uniqueKey}: ${err?.code||"error"} — ${err?.message||""}`,"error");}
   finally{showLoading(false)}
 }
+
 function exportRowsAsObjects(rows){
   return rows.map((po,i)=>({No:i+1,Register:displayRegisterCode(po),"Tgl Kirim":formatDate(po.tglKirim),"Tgl Kembali":formatDate(po.tglKembali),"No PO":po.noPO||"","Nama Customer":po.namaCustomer||"",Keterangan:po.keterangan||"",Status:getStatus(po)==="SUDAH_KEMBALI"?"Sudah Kembali":"Belum Kembali"}));
 }
@@ -1509,7 +1685,7 @@ async function loadImportHistory(){
   }catch(err){console.error(err);el.innerHTML='<div class="empty">Gagal memuat riwayat import.</div>';}
 }
 
-async function initUser(user){state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()){await signOut(auth);toast("Akun belum memiliki profil users di Firestore.","error");return}state.profile=snap.data();if(state.profile.active===false){await signOut(auth);toast("Akun Anda dinonaktifkan.","error");return}loadSavedPeriod();$("loginScreen").classList.add("hidden");$("appScreen").classList.remove("hidden");$("topUserName").textContent=state.profile.name||user.email;$("topUserRole").textContent=state.profile.role||"staff";document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",!isAdmin()));populatePeriods();populateReportFilters();renderRegisterNav();await refresh();navigate("dashboard");}
+async function initUser(user){state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()){await signOut(auth);toast("Akun belum memiliki profil users di Firestore.","error");return}state.profile=snap.data();if(state.profile.active===false){await signOut(auth);toast("Akun Anda dinonaktifkan.","error");return}loadSavedPeriod();$("loginScreen").classList.add("hidden");$("appScreen").classList.remove("hidden");$("topUserName").textContent=state.profile.name||user.email;$("topUserRole").textContent=state.profile.role||"staff";document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",!isAdmin()));populatePeriods();populateReportFilters();renderRegisterNav();if(isAdmin())loadImportDiagnostics();await refresh();if(isAdmin())await scanDuplicateGroups();navigate("dashboard");}
 
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();$("loginBtn").disabled=true;$("loginBtn").textContent="⏳ Login...";try{await signInWithEmailAndPassword(auth,$("loginEmail").value.trim(),$("loginPassword").value)}catch(err){console.error(err);toast(err.code==="auth/invalid-credential"?"Email atau password salah.":"Login gagal. Cek email, password, dan konfigurasi Firebase.","error");}finally{$("loginBtn").disabled=false;$("loginBtn").textContent="🔐 Login";}});
 $("logoutBtn").addEventListener("click",()=>signOut(auth));
@@ -1551,6 +1727,10 @@ $("dataPreviewBtn").addEventListener("click",previewImportFile);
 $("dataImportBtn").addEventListener("click",importPreviewData);
 $("dataExportBtn").addEventListener("click",exportAllDataExcel);
 $("dataTemplateBtn").addEventListener("click",downloadImportTemplate);
-$("dataImportFile").addEventListener("change",()=>{state.importPreview=null;renderImportPreview();$("importPreviewFile").textContent=$("dataImportFile").files?.[0]?.name||"";});
+$("dataImportFile").addEventListener("change",()=>{state.importPreview=null;saveImportDiagnostics();renderImportPreview();$("importPreviewFile").textContent=$("dataImportFile").files?.[0]?.name||"";});
+
+$("downloadImportErrorsBtn").addEventListener("click",()=>{const p=state.importPreview;if(!p)return;const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");exportImportRows(p.errors,`PO_Import_Errors_${stamp}.xlsx`,"Errors")});
+$("downloadImportReadyBtn").addEventListener("click",()=>{const p=state.importPreview;if(!p)return;const stamp=new Date().toISOString().slice(0,10).replace(/-/g,"");exportImportRows(p.ready,`PO_Import_Ready_${stamp}.xlsx`,"Ready Import")});
+$("duplicateScanBtn").addEventListener("click",()=>scanDuplicateGroups());
 
 onAuthStateChanged(auth,user=>{if(user)initUser(user).catch(err=>{console.error(err);toast("Gagal memuat profil pengguna.","error")});else{$("loginScreen").classList.remove("hidden");$("appScreen").classList.add("hidden");}});

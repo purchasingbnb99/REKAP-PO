@@ -89,8 +89,9 @@
     .data-card:hover{transform:translateY(-3px);border-color:#93c5fd;box-shadow:0 0 18px rgba(37,99,235,.12),0 12px 26px rgba(15,23,42,.08)}
     .data-icon{font-size:28px;margin-bottom:8px}.data-card h3{margin:0 0 5px;font-size:16px}.data-card p{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.45}
     .import-preview{margin-top:16px}.import-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}.import-pill{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface2);text-align:center}.import-pill strong{display:block;font-size:20px}.import-pill small{color:var(--muted);font-weight:700}
-    .import-table{max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:10px}.import-table table{min-width:1100px}.import-error{color:#b91c1c;font-weight:700}.import-skip{color:#92400e;font-weight:700}.import-ok{color:#166534;font-weight:700}
+    .import-table{max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:10px}.import-table table{min-width:1100px}.import-error{color:#b91c1c;font-weight:700}.import-skip{color:#92400e;font-weight:700}.import-ok{color:#166534;font-weight:700}.import-diagnostics{margin:10px 0 0;border:1px solid var(--border);border-radius:10px;background:#fff7ed;padding:10px 12px;color:#7c2d12}.import-diagnostics strong{font-weight:800}.import-diagnostics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:7px;margin-top:8px}.import-diagnostic-item{padding:8px 10px;border-radius:8px;background:#fff;border:1px solid #fed7aa;font-size:12px}.import-error-table-head{padding:8px 10px;background:#fee2e2;color:#991b1b;font-weight:800;position:sticky;top:0}.import-error-table-head .muted{color:#7f1d1d}.import-error-table table{min-width:1100px}
     .progress-wrap{margin-top:12px}.progress-track{height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden}.progress-bar{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#22c55e);transition:width .2s ease}.progress-text{margin-top:5px;font-size:12px;color:var(--muted)}
+    .duplicate-audit .panel-body{padding-top:12px}.duplicate-audit table{min-width:980px}.duplicate-audit .btn-danger{white-space:nowrap}
     @media (max-width:900px){.data-grid{grid-template-columns:1fr 1fr}.import-summary{grid-template-columns:1fr 1fr}}
     @media (max-width:560px){.data-grid{grid-template-columns:1fr}.import-summary{grid-template-columns:1fr 1fr}}
 
@@ -222,13 +223,27 @@
               <div class="import-pill"><small>Duplikat</small><strong id="importDuplicate">0</strong></div>
               <div class="import-pill"><small>Error</small><strong id="importError">0</strong></div>
             </div>
+            <div id="importDiagnosticsSummary" class="import-diagnostics"></div>
+            <div class="actions" style="margin:10px 0 12px">
+              <button id="downloadImportErrorsBtn" class="btn btn-warning btn-small" type="button" disabled>📥 Download Error Excel</button>
+              <button id="downloadImportReadyBtn" class="btn btn-outline btn-small" type="button" disabled>📊 Download Data Valid</button>
+            </div>
             <div id="importPreviewTable" class="import-table"></div>
+            <div id="importErrorTable" class="import-table hidden" style="margin-top:12px"></div>
             <div id="importProgressWrap" class="progress-wrap hidden"><div class="progress-track"><div id="importProgressBar" class="progress-bar"></div></div><div id="importProgressText" class="progress-text"></div></div>
           </div>
         </div>
         <div class="panel" style="margin-top:16px">
           <div class="panel-head"><h3>Riwayat Import</h3><span class="muted" style="font-size:12px">Audit aktivitas import</span></div>
           <div class="panel-body"><div id="importHistoryTable" class="table-wrap"><div class="empty">Belum dimuat.</div></div></div>
+        </div>
+        <div id="duplicateAuditPanel" class="panel duplicate-audit hidden" style="margin-top:16px">
+          <div class="panel-head"><h3>Pemeriksaan Duplikat No PO</h3><span class="muted" style="font-size:12px">Admin</span></div>
+          <div class="panel-body">
+            <div class="hint" style="margin-bottom:10px">Memeriksa apakah satu No PO memiliki lebih dari satu dokumen. Tidak ada penghapusan otomatis.</div>
+            <div class="actions" style="margin-bottom:12px"><button id="duplicateScanBtn" class="btn btn-outline" type="button">🔎 Periksa Duplikat</button></div>
+            <div id="duplicateAuditTable" class="import-table"></div>
+          </div>
         </div>
       </section>
 

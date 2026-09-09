@@ -1416,14 +1416,18 @@ async function previewImportFile(){
       if(rowError.length){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo?.code||"",reason:rowError.join("; ")});return;}
       const unique=normalizePO(noPO);
       if(!unique){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"No PO tidak dapat dinormalisasi"});return;}
-      if(seen.has(unique)){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"Duplikat dalam file import"});return;}
+      // Keep Firestore's po_documents/po_unique invariant: noPO and uniqueKey must be identical.
+      // Structured PO codes (e.g. BZOA23A001) remain unchanged; shorthand numeric/PO values are
+      // canonicalized consistently (e.g. 001 -> PO-00001) just like manual input.
+      const canonicalNoPO=unique;
+      if(seen.has(unique)){duplicates.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"Duplikat dalam file import"});return;}
       seen.add(unique);
       const existing=state.allPOs.find(po=>normalizePO(po.noPO)===unique);
-      if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
+      if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
       // The precedence used for historical rows is: Register/No PO, then Tgl Kirim, then Tgl Kembali.
       const actualPeriodSource=suppliedRegister?"Register":(noPO && inferRegisterFromPO(noPO,referenceDate)?"No PO":(tglKirim?"Tgl Kirim":"Tgl Kembali"));
       if(!tglKirim)missingSendCount++;
-      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique,periodSource:actualPeriodSource});
+      ready.push({rowNumber,tglKirim,tglKembali,noPO:canonicalNoPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:canonicalNoPO,periodSource:actualPeriodSource});
     });
     state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,missingSendCount,createdAt:Date.now()};
     renderImportPreview();

@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const APP_VERSION = "1.14.0-idempotent-dedup";
+const APP_VERSION = "1.15.0-bulk-dedup";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhzrMhSPA_S8keOjU6QL2Tath3jFBY9Vs",
@@ -1617,33 +1617,100 @@ function renderDuplicateAudit(groups=state.duplicateGroups||[]){
   if(!wrap||!body)return;
   wrap.classList.remove("hidden");
   if(!groups.length){body.innerHTML='<div class="empty">✅ Tidak ditemukan duplikat No PO berdasarkan data yang saat ini dimuat.</div>';return;}
-  let html=`<div class="hint" style="margin-bottom:10px">Ditemukan <strong>${groups.length}</strong> No PO yang memiliki lebih dari satu dokumen. Sistem menyarankan mempertahankan data terbaik (prioritas Tgl Kembali, lalu Tgl Kirim, lalu waktu dibuat). Tidak ada penghapusan otomatis sebelum Anda menekan tombol tindakan.</div><table><thead><tr><th>No PO</th><th>Jumlah</th><th>Dokumen</th><th>Rekomendasi</th><th>Aksi</th></tr></thead><tbody>`;
+  let html=`<div class="hint duplicate-summary" style="margin-bottom:10px">Ditemukan <strong>${groups.length}</strong> No PO yang memiliki lebih dari satu dokumen. Sistem menyarankan mempertahankan data terbaik (prioritas Tgl Kembali, lalu Tgl Kirim, lalu customer, keterangan, kemudian waktu dibuat). Tidak ada penghapusan otomatis sebelum Anda mengonfirmasi tindakan.</div>`;
+  html+=`<div id="duplicateBulkProgressWrap" class="progress-wrap hidden" style="margin-bottom:12px"><div class="progress-track"><div id="duplicateBulkProgressBar" class="progress-bar"></div></div><div id="duplicateBulkProgressText" class="progress-text"></div></div>`;
+  html+=`<div class="duplicate-bulk-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px"><button id="duplicateBulkBtn" type="button" class="btn btn-danger">🧹 Bersihkan Semua Duplikat (${groups.length})</button><span class="muted" style="font-size:12px">Proses bertahap; data yang sudah bersih tidak disentuh.</span></div>`;
+  html+=`<table><thead><tr><th>No PO</th><th>Jumlah</th><th>Dokumen</th><th>Rekomendasi</th><th>Aksi</th></tr></thead><tbody>`;
   groups.forEach(g=>{
     const canonical=chooseCanonicalForGroup(g.items);
     const docs=g.items.map(po=>`${escapeHTML(po.id)}${po.id===canonical.id?' ⭐':''}`).join('<br>');
     html+=`<tr><td><strong>${escapeHTML(g.key)}</strong></td><td>${g.items.length}</td><td>${docs}</td><td>${escapeHTML(canonical.id)} <span class="muted">(dipertahankan)</span></td><td><button type="button" class="btn btn-danger btn-small" data-dedupe-key="${escapeHTML(g.key)}">Pertahankan & Hapus Duplikat</button></td></tr>`;
   });
   html+='</tbody></table>';body.innerHTML=html;
+  $("duplicateBulkBtn")?.addEventListener("click",cleanupAllDuplicateGroups);
   body.querySelectorAll('[data-dedupe-key]').forEach(btn=>btn.addEventListener('click',()=>cleanupDuplicateGroup(btn.dataset.dedupeKey)));
 }
-async function cleanupDuplicateGroup(uniqueKey){
-  if(!isAdmin())return;
-  const group=(state.duplicateGroups||[]).find(g=>g.key===uniqueKey); if(!group)return;
+function setDuplicateActionsDisabled(disabled){
+  $("duplicateBulkBtn")?.toggleAttribute("disabled",disabled);
+  document.querySelectorAll('[data-dedupe-key]').forEach(btn=>{btn.disabled=disabled;});
+}
+function updateDuplicateBulkProgress(processed,total,removed,groupsDone,failed){
+  const wrap=$("duplicateBulkProgressWrap"), bar=$("duplicateBulkProgressBar"), text=$("duplicateBulkProgressText");
+  if(!wrap||!bar||!text)return;
+  wrap.classList.remove("hidden");
+  const pct=total?Math.round(processed/total*100):100;
+  bar.style.width=`${pct}%`;
+  text.textContent=`${groupsDone} / ${total} kelompok diproses (${pct}%) • ${removed} dokumen duplikat dihapus${failed?` • ${failed} gagal`:``}`;
+}
+async function cleanupDuplicateGroup(uniqueKey,options={confirm:true,refreshAfter:true}){
+  if(!isAdmin())return {ok:false,reason:"unauthorized"};
+  const group=(state.duplicateGroups||[]).find(g=>g.key===uniqueKey); if(!group)return {ok:false,reason:"not-found"};
   const canonical=chooseCanonicalForGroup(group.items);
   const duplicates=group.items.filter(po=>po.id!==canonical.id);
-  if(!duplicates.length){toast("Tidak ada dokumen duplikat yang perlu dihapus.","warn");return;}
-  if(!confirm(`No PO ${uniqueKey} memiliki ${group.items.length} dokumen. Pertahankan ${canonical.id} dan hapus ${duplicates.length} duplikat?`))return;
+  if(!duplicates.length){toast("Tidak ada dokumen duplikat yang perlu dihapus.","warn");return {ok:false,reason:"empty"};}
+  if(options.confirm && !confirm(`No PO ${uniqueKey} memiliki ${group.items.length} dokumen.\n\nPertahankan dokumen: ${canonical.id}\nHapus duplikat: ${duplicates.length} dokumen\n\nLanjutkan?`))return {ok:false,reason:"cancelled"};
   try{
-    showLoading(true);
-    const batch=writeBatch(db);
-    batch.set(doc(db,"po_unique",uniqueKey),{noPO:uniqueKey,poId:canonical.id,updatedAt:serverTimestamp(),updatedBy:state.user.uid});
-    for(const po of duplicates) batch.delete(doc(db,"po_documents",po.id));
-    await batch.commit();
+    const maxDeletesPerBatch=499;
+    for(let start=0;start<duplicates.length;start+=maxDeletesPerBatch){
+      const batch=writeBatch(db);
+      if(start===0){
+        batch.set(doc(db,"po_unique",uniqueKey),{noPO:uniqueKey,poId:canonical.id,updatedAt:serverTimestamp(),updatedBy:state.user.uid});
+      }
+      const chunk=duplicates.slice(start,start+maxDeletesPerBatch);
+      for(const po of chunk) batch.delete(doc(db,"po_documents",po.id));
+      await batch.commit();
+    }
     await writeAudit("DEDUP_PO",uniqueKey,canonical.registerCode||"",`Membersihkan ${duplicates.length} duplikat; dipertahankan ${canonical.id}.`);
     toast(`${uniqueKey}: ${duplicates.length} duplikat dihapus.`,"success");
-    await refresh(); await scanDuplicateGroups();
-  }catch(err){console.error(err);toast(`Gagal membersihkan ${uniqueKey}: ${err?.code||"error"} — ${err?.message||""}`,"error");}
-  finally{showLoading(false)}
+    if(options.refreshAfter){await refresh(); await scanDuplicateGroups();}
+    return {ok:true,removed:duplicates.length,canonicalId:canonical.id};
+  }catch(err){
+    console.error(err);
+    toast(`Gagal membersihkan ${uniqueKey}: ${err?.code||"error"} — ${err?.message||""}`,"error");
+    return {ok:false,error:err};
+  }
+}
+async function cleanupAllDuplicateGroups(){
+  if(!isAdmin())return;
+  const groups=Array.isArray(state.duplicateGroups)?state.duplicateGroups.map(g=>({key:g.key,items:[...g.items]})):[];
+  if(!groups.length){toast("Tidak ada kelompok duplikat yang perlu dibersihkan.","success");return;}
+  const total=groups.length;
+  const totalDuplicates=groups.reduce((sum,g)=>sum+Math.max(0,g.items.length-1),0);
+  const approved=confirm(`Ditemukan ${total} kelompok duplikat dengan total ${totalDuplicates} dokumen duplikat.\n\nSistem akan mempertahankan 1 dokumen terbaik pada setiap kelompok dan menghapus hanya dokumen duplikat.\n\nTidak ada No PO tunggal yang akan dihapus.\n\nLanjutkan pembersihan semua?`);
+  if(!approved)return;
+  try{
+    setDuplicateActionsDisabled(true);
+    $("duplicateBulkProgressWrap")?.classList.remove("hidden");
+    showLoading(true);
+    let processed=0,removed=0,failed=0;
+    updateDuplicateBulkProgress(0,total,0,0,0);
+    for(const g of groups){
+      const result=await cleanupDuplicateGroup(g.key,{confirm:false,refreshAfter:false});
+      if(result.ok)removed+=result.removed||0;
+      else failed++;
+      processed++;
+      updateDuplicateBulkProgress(processed,total,removed,processed,failed);
+      if(!result.ok){
+        toast(`Pembersihan dihentikan pada ${g.key}. Periksa error sebelum melanjutkan.`,"error");
+        break;
+      }
+    }
+    await refresh();
+    await scanDuplicateGroups();
+    const finalGroups=state.duplicateGroups||[];
+    if(!failed && processed===total){
+      toast(`Cleanup selesai: ${total} kelompok diproses, ${removed} dokumen duplikat dihapus.`,"success");
+    }else if(failed){
+      toast(`Cleanup berhenti: ${processed} dari ${total} kelompok diproses. Duplikat yang tersisa dapat diperiksa kembali.`,"warn");
+    }
+    if($("duplicateBulkProgressText")){
+      const remaining=finalGroups.length;
+      $("duplicateBulkProgressText").textContent=`${processed} / ${total} kelompok diproses • ${removed} dokumen duplikat dihapus${failed?` • ${failed} gagal`:``}${remaining?` • ${remaining} kelompok masih terdeteksi`:" • Semua duplikat bersih"}`;
+    }
+  }finally{
+    showLoading(false);
+    setDuplicateActionsDisabled(false);
+  }
 }
 
 function exportRowsAsObjects(rows){

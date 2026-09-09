@@ -83,6 +83,7 @@
     .quick:nth-child(2){background:linear-gradient(135deg,rgba(34,211,238,.20),#fff 72%)}
     .quick:nth-child(3){background:linear-gradient(135deg,rgba(96,165,250,.20),#fff 72%)}
     .quick:hover{transform:translateY(-3px);box-shadow:0 0 0 2px rgba(96,165,250,.12),0 0 22px rgba(96,165,250,.16),0 14px 26px rgba(15,23,42,.10);border-color:#93c5fd}
+    .report-date-filters .field{margin-bottom:0}.report-date-filters label{font-size:12px}.report-date-filters select,.report-date-filters input{width:100%}
     .data-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
     .data-card{border:1px solid var(--border);border-radius:13px;padding:17px;background:#fff;box-shadow:var(--shadow);transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
     .data-card:hover{transform:translateY(-3px);border-color:#93c5fd;box-shadow:0 0 18px rgba(37,99,235,.12),0 12px 26px rgba(15,23,42,.08)}
@@ -175,7 +176,7 @@
         <div class="page-head"><div><h2>Laporan PO</h2><p>Filter, cetak, dan export data.</p></div><div class="actions"><button id="reportPrint" class="btn btn-primary" type="button">🖨️ Print</button><button id="reportExport" class="btn btn-outline admin-only hidden" type="button">📊 Export Excel</button></div></div>
         <div class="panel"><div class="panel-body"><div class="filters">
           <select id="reportYear"></select><select id="reportMonth"><option value="ALL">Semua Bulan</option></select><select id="reportGroup"><option value="ALL">Semua Register</option></select><select id="reportStatus"><option value="ALL">Semua Status</option><option value="BELUM_KEMBALI">Belum Kembali</option><option value="SUDAH_KEMBALI">Sudah Kembali</option></select><button id="reportReset" class="btn btn-secondary" type="button">Reset</button>
-        </div><div class="filters"><input id="reportFrom" class="input" type="date"><input id="reportTo" class="input" type="date"><input id="reportSearch" class="input" type="search" placeholder="Cari No PO / Customer"><div></div><div></div></div>
+        </div><div class="filters report-date-filters"><div class="field"><label for="reportDateField">Filter tanggal berdasarkan</label><select id="reportDateField"><option value="send">Tgl Kirim</option><option value="return">Tgl Kembali</option></select></div><div class="field"><label for="reportFrom">Dari</label><input id="reportFrom" class="input" type="date"></div><div class="field"><label for="reportTo">Sampai</label><input id="reportTo" class="input" type="date"></div><div class="field"><label for="reportSearch">Pencarian</label><input id="reportSearch" class="input" type="search" placeholder="Cari No PO / Customer"></div><div></div></div>
           <div class="report-summary"><div class="report-pill"><small>Total</small><strong id="reportTotal">0</strong></div><div class="report-pill"><small>Sudah Kembali</small><strong id="reportReturned">0</strong></div><div class="report-pill"><small>Belum Kembali</small><strong id="reportOutstanding">0</strong></div></div>
           <div id="reportTable" class="table-wrap"></div>
         </div></div>
@@ -190,7 +191,7 @@
         <div class="data-grid">
           <div class="data-card">
             <div class="data-icon">📥</div><h3>Import Excel</h3>
-            <p>Import histori PO 2021 dan seterusnya. Sistem akan preview, validasi, dan melewati duplikat sebelum data masuk Firestore.</p>
+            <p>Import histori PO 2021 dan seterusnya. Tgl Kirim boleh kosong untuk arsip lama; sistem tidak akan mengarang tanggal dan tetap memvalidasi periode.</p>
             <input id="dataImportFile" class="input" type="file" accept=".xlsx,.xls,.csv">
             <div class="actions" style="margin-top:10px"><button id="dataPreviewBtn" class="btn btn-primary" type="button">🔎 Preview & Validasi</button><button id="dataImportBtn" class="btn btn-success" type="button" disabled>📥 Import Data</button></div>
           </div>
@@ -208,11 +209,12 @@
         <div class="panel" style="margin-top:16px">
           <div class="panel-head"><h3>Ketentuan Import</h3><span class="muted" style="font-size:12px">Format yang disarankan</span></div>
           <div class="panel-body">
-            <div class="hint">Kolom utama: <strong>Tgl Kirim</strong>, <strong>Tgl Kembali</strong>, <strong>No PO</strong>, <strong>Nama Customer</strong>, <strong>Keterangan</strong>, dan <strong>Register</strong>. Tanggal boleh berupa tanggal Excel atau format dd/mm/yyyy. Register boleh berupa BZOA26-A maupun BZOA26A.</div>
+            <div class="hint">Kolom utama: <strong>Tgl Kirim</strong>, <strong>Tgl Kembali</strong>, <strong>No PO</strong>, <strong>Nama Customer</strong>, <strong>Keterangan</strong>, dan <strong>Register</strong>. Tgl Kirim boleh kosong untuk histori. Jika kosong, periode dicari dari Register atau kode No PO; Tgl Kembali hanya menjadi fallback tanggal periode saat informasi tahun/bulan lain tersedia. Sistem tidak mengisi tanggal palsu.</div>
           </div>
         </div>
         <div id="importPreviewPanel" class="panel import-preview hidden">
           <div class="panel-head"><h3>Preview Import</h3><span id="importPreviewFile" class="muted" style="font-size:12px"></span></div>
+          <div id="importHistoricalHint" class="hint hidden" style="padding:0 16px 10px;color:#92400e"></div>
           <div class="panel-body">
             <div class="import-summary">
               <div class="import-pill"><small>Total Baris</small><strong id="importTotal">0</strong></div>

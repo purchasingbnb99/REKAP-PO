@@ -1444,7 +1444,7 @@ async function importPreviewData(){
   if(!confirm(`Import ${p.ready.length} PO valid dari ${p.fileName}? Duplikat sudah dilewati dan tidak akan menimpa data yang ada.${warning}`))return;
   try{
     showLoading(true);$("dataImportBtn").disabled=true;$("importProgressWrap").classList.remove("hidden");
-    const chunkSize=200;const total=p.ready.length;let done=0;
+    const chunkSize=4;const total=p.ready.length;let done=0;
     for(let start=0;start<total;start+=chunkSize){
       const chunk=p.ready.slice(start,start+chunkSize);const batch=writeBatch(db);
       chunk.forEach(item=>{
@@ -1458,7 +1458,12 @@ async function importPreviewData(){
     await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati, ${p.errors.length} baris error dilewati${p.missingSendCount?`, ${p.missingSendCount} tanpa Tgl Kirim`:""}.`);
     toast(p.errors.length ? `${p.ready.length} PO berhasil di-import. ${p.errors.length} baris error dilewati.` : `${p.ready.length} PO berhasil di-import.`, p.errors.length ? "warn" : "success");
     state.importPreview=null;renderImportPreview();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");await refresh();await loadImportHistory();
-  }catch(err){console.error(err);toast("Import gagal. Batch sebelumnya yang sudah committed tetap tersimpan; ulangi hanya untuk data yang belum masuk setelah pemeriksaan.","error");}
+  }catch(err){
+    console.error("Import Firestore error:",err);
+    const code=String(err?.code||"");
+    const detail=code?` (${code})`:"";
+    toast(`Import gagal${detail}: ${err?.message||"Periksa Firestore Rules dan koneksi."}`,"error");
+  }
   finally{showLoading(false)}
 }
 function exportRowsAsObjects(rows){

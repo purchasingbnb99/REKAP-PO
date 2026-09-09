@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const APP_VERSION = "1.12.0-data-import";
+const APP_VERSION = "1.13.0-historical-date";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhzrMhSPA_S8keOjU6QL2Tath3jFBY9Vs",
@@ -276,6 +276,7 @@ function populateReportFilters() {
   $("reportGroup").innerHTML = "<option value=\"ALL\">Semua Register</option>" + GROUPS.map(g=>`<option value="${g}">${escapeHTML(getRegisterCode(g,state.year,state.month))}</option>`).join("");
   $("reportStatus").value="ALL";
   $("reportMonth").value=String(state.month);
+  if($("reportDateField")) $("reportDateField").value="send";
 }
 function renderRegisterNav() {
   $("registerNav").innerHTML = GROUPS.map(g=>`<button type="button" class="nav-btn" data-group="${g}">📁 ${g}</button>`).join("");
@@ -361,11 +362,15 @@ function renderAllPO(){
   const filtered=applyFilter(state.allPOs,$("allSearch").value,$("allFrom").value,$("allTo").value,$("allStatus").value); renderTable(filtered,$("allTable"),true);
 }
 function reportFilteredRows(){
-  let rows=[...state.allPOs]; const y=$("reportYear").value, m=$("reportMonth").value, g=$("reportGroup").value, st=$("reportStatus").value, q=$("reportSearch").value, from=$("reportFrom").value, to=$("reportTo").value;
+  let rows=[...state.allPOs]; const y=$("reportYear").value, m=$("reportMonth").value, g=$("reportGroup").value, st=$("reportStatus").value, q=$("reportSearch").value, from=$("reportFrom").value, to=$("reportTo").value, dateField=$("reportDateField")?.value||"send";
   if(y!=="ALL") rows=rows.filter(po=>resolveStoredPeriod(po).year===Number(y));
   if(m!=="ALL") rows=rows.filter(po=>resolveStoredPeriod(po).month===Number(m));
   if(g!=="ALL") rows=rows.filter(po=>resolveStoredPeriod(po).group===g);
-  return applyFilter(rows,q,from,to,st);
+  if(from || to){
+    const key=dateField==="return"?"tglKembali":"tglKirim";
+    rows=rows.filter(po=>{const d=String(po[key]||""); if(!d)return false; if(from&&d<from)return false; if(to&&d>to)return false; return true;});
+  }
+  return applyFilter(rows,q,"","",st);
 }
 function renderReport(){const rows=reportFilteredRows();$("reportTotal").textContent=rows.length;$("reportReturned").textContent=rows.filter(po=>getStatus(po)==="SUDAH_KEMBALI").length;$("reportOutstanding").textContent=rows.filter(po=>getStatus(po)==="BELUM_KEMBALI").length;renderTable(rows,$("reportTable"),true);}
 
@@ -1203,6 +1208,10 @@ function printReport(){
   const y = $("reportYear").value;
   const m = $("reportMonth").value;
   const g = $("reportGroup").value;
+  const dateField = $("reportDateField")?.value || "send";
+  const dateFieldLabel = dateField === "return" ? "Tgl Kembali" : "Tgl Kirim";
+  const dateFrom = $("reportFrom").value;
+  const dateTo = $("reportTo").value;
   const title = "Laporan PO - " +
     (y === "ALL" ? "Semua Tahun" : y) + " - " +
     (m === "ALL" ? "Semua Bulan" : MONTHS[Number(m) - 1]) + " - " +
@@ -1255,7 +1264,7 @@ function printReport(){
 </head>
 <body>
   <h1>${escapeHTML(title)}</h1>
-  <div class="meta">Dicetak ${escapeHTML(new Date().toLocaleString("id-ID"))}</div>
+  <div class="meta">Dicetak ${escapeHTML(new Date().toLocaleString("id-ID"))} • Filter tanggal: ${escapeHTML(dateFieldLabel)}${dateFrom||dateTo?` • ${escapeHTML(dateFrom||"awal")} s/d ${escapeHTML(dateTo||"akhir")}`:""}</div>
   <div class="summary">
     <div class="pill"><span>Total PO</span><strong>${rows.length}</strong></div>
     <div class="pill green"><span>Sudah Kembali</span><strong>${returned}</strong></div>
@@ -1345,6 +1354,11 @@ function renderImportPreview(){
     html+='</tbody></table>';$("importPreviewTable").innerHTML=html;
   }
   $("dataImportBtn").disabled=!(p.ready.length>0 && p.errors.length===0);
+  const hint=$("importHistoricalHint");
+  if(hint){
+    hint.textContent=p.missingSendCount?`${p.missingSendCount} baris tidak memiliki Tgl Kirim. Data tetap dapat di-import tanpa mengisi tanggal palsu; status akan mengikuti Tgl Kembali jika tersedia.`:"";
+    hint.classList.toggle("hidden",!p.missingSendCount);
+  }
 }
 async function previewImportFile(){
   if(!isAdmin())return;
@@ -1369,26 +1383,35 @@ async function previewImportFile(){
       note:findHeader(sample,["Keterangan","Keterangan PO","Catatan"]),
       register:findHeader(sample,["Register","Register Code","Kode Register"])
     };
-    if(!headers.send || !headers.po || !headers.customer)throw new Error("Kolom wajib belum lengkap. Minimal: Tgl Kirim, No PO, Nama Customer.");
+    if(!headers.po || !headers.customer)throw new Error("Kolom wajib belum lengkap. Minimal: No PO dan Nama Customer. Tgl Kirim boleh kosong untuk data historis.");
     const ready=[],duplicates=[],errors=[],seen=new Set();
+    let missingSendCount=0;
     rows.forEach((row,index)=>{
       const rowNumber=index+2;
-      const tglKirim=parseImportDate(row[headers.send]);
-      const tglKembali=headers.ret?parseImportDate(row[headers.ret]):"";
+      const rawSend=row[headers.send];
+      const rawReturn=headers.ret?row[headers.ret]:"";
+      const tglKirim=parseImportDate(rawSend);
+      const tglKembali=parseImportDate(rawReturn);
+      const rawSendPresent=rawSend!==null && rawSend!==undefined && String(rawSend).trim()!=="";
+      const rawReturnPresent=rawReturn!==null && rawReturn!==undefined && String(rawReturn).trim()!=="";
       const noPO=String(row[headers.po]??"").trim().toUpperCase();
       const customer=String(row[headers.customer]??"").trim();
       const note=headers.note?String(row[headers.note]??"").trim():"";
       const suppliedRegister=headers.register?String(row[headers.register]??"").trim():"";
-      let regInfo=suppliedRegister?parseRegisterInput(suppliedRegister,tglKirim):null;
-      if(!regInfo)regInfo=inferRegisterFromPO(noPO,tglKirim);
+      const referenceDate=tglKirim||tglKembali||"";
+      let regInfo=suppliedRegister?parseRegisterInput(suppliedRegister,referenceDate):null;
+      if(!regInfo)regInfo=inferRegisterFromPO(noPO,referenceDate);
       const rowError=[];
-      if(!tglKirim)rowError.push("Tgl Kirim tidak valid/kosong");
-      if(tglKembali && tglKembali<tglKirim)rowError.push("Tgl Kembali sebelum Tgl Kirim");
+      if(rawSendPresent && !tglKirim)rowError.push("Tgl Kirim tidak valid");
+      if(rawReturnPresent && !tglKembali)rowError.push("Tgl Kembali tidak valid");
+      if(tglKirim && tglKembali && tglKembali<tglKirim)rowError.push("Tgl Kembali sebelum Tgl Kirim");
       if(!noPO)rowError.push("No PO kosong");
       if(!customer)rowError.push("Nama Customer kosong");
-      if(suppliedRegister && !parseRegisterInput(suppliedRegister,tglKirim))rowError.push("Format Register tidak dikenali");
+      if(suppliedRegister && !parseRegisterInput(suppliedRegister,referenceDate))rowError.push("Format Register tidak dikenali");
       if(regInfo && tglKirim && (regInfo.year!==Number(tglKirim.slice(0,4)) || regInfo.month!==Number(tglKirim.slice(5,7))))rowError.push("Register tidak sesuai dengan bulan/tahun Tgl Kirim");
-      if(!regInfo)rowError.push("Register tidak dikenali dan tidak dapat diinfer dari No PO");
+      if(!regInfo){
+        rowError.push(tglKirim||tglKembali?"Register tidak dikenali. Isi Register atau gunakan No PO lengkap yang memuat kode register.":"Periode tidak dapat ditentukan. Isi Register atau gunakan No PO lengkap yang memuat tahun/bulan register.");
+      }
       if(rowError.length){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo?.code||"",reason:rowError.join("; ")});return;}
       const unique=normalizePO(noPO);
       if(!unique){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"No PO tidak dapat dinormalisasi"});return;}
@@ -1396,12 +1419,19 @@ async function previewImportFile(){
       seen.add(unique);
       const existing=state.allPOs.find(po=>normalizePO(po.noPO)===unique);
       if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
-      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique});
+      // The precedence used for historical rows is: Register/No PO, then Tgl Kirim, then Tgl Kembali.
+      const actualPeriodSource=suppliedRegister?"Register":(noPO && inferRegisterFromPO(noPO,referenceDate)?"No PO":(tglKirim?"Tgl Kirim":"Tgl Kembali"));
+      if(!tglKirim)missingSendCount++;
+      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique,periodSource:actualPeriodSource});
     });
-    state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,createdAt:Date.now()};
+    state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,missingSendCount,createdAt:Date.now()};
     renderImportPreview();
-    if(errors.length)toast(`Preview selesai: ${ready.length} siap, ${duplicates.length} duplikat, ${errors.length} error.`,"warn");
-    else toast(`Preview selesai: ${ready.length} data siap di-import.`,"success");
+    if(errors.length){
+      toast(`Preview selesai: ${ready.length} siap, ${duplicates.length} duplikat, ${errors.length} error.`,"warn");
+    }else{
+      const historyNote=missingSendCount?` (${missingSendCount} tanpa Tgl Kirim, tetap aman)`:"";
+      toast(`Preview selesai: ${ready.length} data siap di-import${historyNote}.`,"success");
+    }
   }catch(err){console.error(err);toast(err?.message||"Gagal membaca file Excel.","error");state.importPreview=null;renderImportPreview();}
   finally{showLoading(false)}
 }
@@ -1424,7 +1454,7 @@ async function importPreviewData(){
       await batch.commit();
       done+=chunk.length;const pct=Math.round(done/total*100);$("importProgressBar").style.width=`${pct}%`;$("importProgressText").textContent=`${done} / ${total} PO (${pct}%)`;
     }
-    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati.`);
+    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati${p.missingSendCount?`, ${p.missingSendCount} tanpa Tgl Kirim`:""}.`);
     toast(`${p.ready.length} PO berhasil di-import.`,"success");
     state.importPreview=null;renderImportPreview();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");await refresh();await loadImportHistory();
   }catch(err){console.error(err);toast("Import gagal. Batch sebelumnya yang sudah committed tetap tersimpan; ulangi hanya untuk data yang belum masuk setelah pemeriksaan.","error");}
@@ -1448,10 +1478,10 @@ async function downloadImportTemplate(){
     showLoading(true);const XLSX=await loadXLSXLibrary();const wb=XLSX.utils.book_new();
     const rows=[
       {"Tgl Kirim":"01/01/2021","Tgl Kembali":"05/01/2021","No PO":"BZOA21A001","Nama Customer":"Contoh Customer","Keterangan":"Contoh data","Register":"BZOA21-A"},
-      {"Tgl Kirim":"02/02/2021","Tgl Kembali":"","No PO":"BZOB21A001","Nama Customer":"Customer B","Keterangan":"","Register":"BZOB21-B"}
+      {"Tgl Kirim":"","Tgl Kembali":"15/02/2021","No PO":"BZOB21B002","Nama Customer":"Contoh Histori Tanpa Tgl Kirim","Keterangan":"Tgl Kirim tidak tersedia di arsip","Register":"BZOB21-B"}
     ];
     const ws=XLSX.utils.json_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,"Template Import");
-    const info=[{"Kolom":"Tgl Kirim","Wajib":"Ya","Keterangan":"Tanggal kirim; dipakai untuk menentukan tahun/bulan jika register tidak lengkap."},{"Kolom":"Tgl Kembali","Wajib":"Tidak","Keterangan":"Kosongkan jika belum kembali."},{"Kolom":"No PO","Wajib":"Ya","Keterangan":"No PO asli, jangan diubah."},{"Kolom":"Nama Customer","Wajib":"Ya","Keterangan":"Nama customer."},{"Kolom":"Keterangan","Wajib":"Tidak","Keterangan":"Catatan PO."},{"Kolom":"Register","Wajib":"Disarankan","Keterangan":"Contoh BZOA21-A atau BZOA21A."}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(info),"Petunjuk");
+    const info=[{"Kolom":"Tgl Kirim","Wajib":"Tidak untuk histori","Keterangan":"Boleh kosong untuk data lama. Jika kosong, jangan diisi tanggal palsu."},{"Kolom":"Tgl Kembali","Wajib":"Tidak","Keterangan":"Boleh diisi walaupun Tgl Kirim kosong. Jika ada, status otomatis Sudah Kembali."},{"Kolom":"No PO","Wajib":"Ya","Keterangan":"No PO asli, jangan diubah."},{"Kolom":"Nama Customer","Wajib":"Ya","Keterangan":"Nama customer."},{"Kolom":"Keterangan","Wajib":"Tidak","Keterangan":"Catatan PO."},{"Kolom":"Register","Wajib":"Disarankan","Keterangan":"Contoh BZOA21-A atau BZOA21A. Jika Tgl Kirim kosong, Register sangat membantu menentukan periode."}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(info),"Petunjuk");
     XLSX.writeFile(wb,"Template_Import_PO.xlsx");toast("Template Excel berhasil dibuat.","success");
   }catch(err){console.error(err);toast("Gagal membuat template Excel.","error");}
   finally{showLoading(false)}
@@ -1481,7 +1511,7 @@ $("dashboardAdd").addEventListener("click",()=>openPOForm());$("manualQuick").ad
 $("registerBack").addEventListener("click",()=>navigate("dashboard"));$("registerAdd").addEventListener("click",()=>openPOForm());
 ["regSearch","regFrom","regTo","regStatus"].forEach(id=>$(id).addEventListener("input",renderCurrentRegister));$("regReset").addEventListener("click",()=>{["regSearch","regFrom","regTo"].forEach(id=>$(id).value="");$("regStatus").value="ALL";renderCurrentRegister()});
 ["allSearch","allFrom","allTo","allStatus"].forEach(id=>$(id).addEventListener("input",renderAllPO));$("allReset").addEventListener("click",()=>{["allSearch","allFrom","allTo"].forEach(id=>$(id).value="");$("allStatus").value="ALL";renderAllPO()});
-["reportYear","reportMonth","reportGroup","reportStatus","reportFrom","reportTo","reportSearch"].forEach(id=>$(id).addEventListener("input",renderReport));$("reportReset").addEventListener("click",()=>{populateReportFilters();$("reportFrom").value="";$("reportTo").value="";$("reportSearch").value="";renderReport()});$("reportPrint").addEventListener("click",printReport);$("reportExport").addEventListener("click",exportExcel);
+["reportYear","reportMonth","reportGroup","reportStatus","reportFrom","reportTo","reportSearch","reportDateField"].forEach(id=>$(id).addEventListener("input",renderReport));$("reportReset").addEventListener("click",()=>{populateReportFilters();$("reportFrom").value="";$("reportTo").value="";$("reportSearch").value="";$("reportDateField").value="send";renderReport()});$("reportPrint").addEventListener("click",printReport);$("reportExport").addEventListener("click",exportExcel);
 $("poClose").addEventListener("click",()=>closeModal("poModal"));$("poCancel").addEventListener("click",()=>closeModal("poModal"));$("poForm").addEventListener("submit",savePO);
 $("quickClose").addEventListener("click",()=>closeModal("quickModal"));$("quickCancel").addEventListener("click",()=>closeModal("quickModal"));$("quickRun").addEventListener("click",runQuick);$("quickPo").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();runQuick()}});
 $("confirmClose").addEventListener("click",()=>closeModal("confirmModal"));$("confirmCancel").addEventListener("click",()=>closeModal("confirmModal"));$("confirmRun").addEventListener("click",runConfirm);

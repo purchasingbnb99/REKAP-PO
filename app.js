@@ -1353,7 +1353,8 @@ function renderImportPreview(){
     combined.forEach(r=>{const note=r.reason||"Siap";html+=`<tr><td>${r.rowNumber}</td><td class="${importRowCellClass(r._state)}">${r._state==="ready"?"Siap Import":r._state==="duplicate"?"Duplikat": "Error"}</td><td>${escapeHTML(r.registerCode||"-")}</td><td>${escapeHTML(formatDate(r.tglKirim))}</td><td>${escapeHTML(formatDate(r.tglKembali))}</td><td><strong>${escapeHTML(r.noPO||"")}</strong></td><td>${escapeHTML(r.namaCustomer||"")}</td><td>${escapeHTML(r.keterangan||"")}</td><td>${escapeHTML(note)}</td></tr>`});
     html+='</tbody></table>';$("importPreviewTable").innerHTML=html;
   }
-  $("dataImportBtn").disabled=!(p.ready.length>0 && p.errors.length===0);
+  $("dataImportBtn").disabled=!(p.ready.length>0);
+  $("dataImportBtn").textContent = p.errors.length ? `📥 Import ${p.ready.length} Data Valid` : "📥 Import Data";
   const hint=$("importHistoricalHint");
   if(hint){
     hint.textContent=p.missingSendCount?`${p.missingSendCount} baris tidak memiliki Tgl Kirim. Data tetap dapat di-import tanpa mengisi tanggal palsu; status akan mengikuti Tgl Kembali jika tersedia.`:"";
@@ -1439,8 +1440,8 @@ async function importPreviewData(){
   if(!isAdmin())return;
   const p=state.importPreview;
   if(!p || !p.ready.length){toast("Tidak ada data valid untuk di-import.","warn");return;}
-  if(p.errors.length){toast("Perbaiki baris yang error terlebih dahulu. Data belum bisa di-import.","error");return;}
-  if(!confirm(`Import ${p.ready.length} PO dari ${p.fileName}? Duplikat sudah dilewati dan tidak akan menimpa data yang ada.`))return;
+  const warning = p.errors.length ? `\n\nPerhatian: ${p.errors.length} baris error akan dilewati dan TIDAK akan di-import. Perbaiki baris tersebut di Excel jika ingin memasukkannya nanti.` : "";
+  if(!confirm(`Import ${p.ready.length} PO valid dari ${p.fileName}? Duplikat sudah dilewati dan tidak akan menimpa data yang ada.${warning}`))return;
   try{
     showLoading(true);$("dataImportBtn").disabled=true;$("importProgressWrap").classList.remove("hidden");
     const chunkSize=200;const total=p.ready.length;let done=0;
@@ -1454,8 +1455,8 @@ async function importPreviewData(){
       await batch.commit();
       done+=chunk.length;const pct=Math.round(done/total*100);$("importProgressBar").style.width=`${pct}%`;$("importProgressText").textContent=`${done} / ${total} PO (${pct}%)`;
     }
-    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati${p.missingSendCount?`, ${p.missingSendCount} tanpa Tgl Kirim`:""}.`);
-    toast(`${p.ready.length} PO berhasil di-import.`,"success");
+    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati, ${p.errors.length} baris error dilewati${p.missingSendCount?`, ${p.missingSendCount} tanpa Tgl Kirim`:""}.`);
+    toast(p.errors.length ? `${p.ready.length} PO berhasil di-import. ${p.errors.length} baris error dilewati.` : `${p.ready.length} PO berhasil di-import.`, p.errors.length ? "warn" : "success");
     state.importPreview=null;renderImportPreview();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");await refresh();await loadImportHistory();
   }catch(err){console.error(err);toast("Import gagal. Batch sebelumnya yang sudah committed tetap tersimpan; ulangi hanya untuk data yang belum masuk setelah pemeriksaan.","error");}
   finally{showLoading(false)}

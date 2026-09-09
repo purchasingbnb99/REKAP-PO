@@ -63,6 +63,36 @@
     }
     #printRoot{display:none}.print-report{font-family:Arial,Helvetica,sans-serif;color:#0f172a;background:#fff}.print-report h1{font-size:20px;margin:0 0 5px}.print-meta{font-size:12px;color:#475569;margin-bottom:12px}.print-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px}.print-pill{border:1px solid #94a3b8;border-radius:8px;padding:8px 10px;background:#e2e8f0;text-align:center}.print-pill span{display:block;font-size:10px;font-weight:800;text-transform:uppercase;color:#334155}.print-pill strong{display:block;font-size:18px;margin-top:2px}.print-pill.print-green{background:#dcfce7}.print-pill.print-red{background:#fee2e2}.print-table{width:100%;border-collapse:collapse;min-width:0}.print-table th,.print-table td{border:1px solid #64748b;padding:7px 8px;font-size:10pt;text-align:center;vertical-align:middle}.print-table th{background:#bfdbfe!important;color:#0f172a!important;font-weight:800}.print-table tr{break-inside:avoid}.print-table thead{display:table-header-group}
     .print-only{display:none}
+  
+    /* V1.12 dashboard polish */
+    .brand span{font-weight:900;letter-spacing:.02em;text-shadow:0 0 6px rgba(255,255,255,.25),0 0 14px rgba(96,165,250,.42);animation:brandGlow 2.8s ease-in-out infinite}
+    @keyframes brandGlow{0%,100%{text-shadow:0 0 5px rgba(255,255,255,.2),0 0 12px rgba(96,165,250,.28)}50%{text-shadow:0 0 8px rgba(255,255,255,.32),0 0 20px rgba(96,165,250,.52)}}
+    .stat{position:relative;overflow:hidden;transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease;background:linear-gradient(135deg,#ffffff,#f8fbff)}
+    .stat::before{content:"";position:absolute;inset:0 0 0 0;border-left:6px solid transparent;pointer-events:none}
+    .stat:nth-child(1){background:linear-gradient(135deg,rgba(96,165,250,.22),rgba(255,255,255,.98) 70%)}
+    .stat:nth-child(1)::before{border-left-color:#60a5fa}
+    .stat:nth-child(2){background:linear-gradient(135deg,rgba(52,211,153,.21),rgba(255,255,255,.98) 70%)}
+    .stat:nth-child(2)::before{border-left-color:#34d399}
+    .stat:nth-child(3){background:linear-gradient(135deg,rgba(251,113,133,.22),rgba(255,255,255,.98) 70%)}
+    .stat:nth-child(3)::before{border-left-color:#fb7185}
+    .stat:nth-child(4){background:linear-gradient(135deg,rgba(251,191,36,.22),rgba(255,255,255,.98) 70%)}
+    .stat:nth-child(4)::before{border-left-color:#fbbf24}
+    .stat:hover{transform:translateY(-3px);box-shadow:0 0 0 2px rgba(37,99,235,.08),0 0 22px rgba(37,99,235,.14),0 14px 28px rgba(15,23,42,.10)}
+    .quick{transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease,background .16s ease;position:relative;overflow:hidden}
+    .quick:nth-child(1){background:linear-gradient(135deg,rgba(167,139,250,.20),#fff 72%)}
+    .quick:nth-child(2){background:linear-gradient(135deg,rgba(34,211,238,.20),#fff 72%)}
+    .quick:nth-child(3){background:linear-gradient(135deg,rgba(96,165,250,.20),#fff 72%)}
+    .quick:hover{transform:translateY(-3px);box-shadow:0 0 0 2px rgba(96,165,250,.12),0 0 22px rgba(96,165,250,.16),0 14px 26px rgba(15,23,42,.10);border-color:#93c5fd}
+    .data-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+    .data-card{border:1px solid var(--border);border-radius:13px;padding:17px;background:#fff;box-shadow:var(--shadow);transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease}
+    .data-card:hover{transform:translateY(-3px);border-color:#93c5fd;box-shadow:0 0 18px rgba(37,99,235,.12),0 12px 26px rgba(15,23,42,.08)}
+    .data-icon{font-size:28px;margin-bottom:8px}.data-card h3{margin:0 0 5px;font-size:16px}.data-card p{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.45}
+    .import-preview{margin-top:16px}.import-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px}.import-pill{border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--surface2);text-align:center}.import-pill strong{display:block;font-size:20px}.import-pill small{color:var(--muted);font-weight:700}
+    .import-table{max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:10px}.import-table table{min-width:1100px}.import-error{color:#b91c1c;font-weight:700}.import-skip{color:#92400e;font-weight:700}.import-ok{color:#166534;font-weight:700}
+    .progress-wrap{margin-top:12px}.progress-track{height:12px;background:#e2e8f0;border-radius:999px;overflow:hidden}.progress-bar{height:100%;width:0;background:linear-gradient(90deg,#2563eb,#22c55e);transition:width .2s ease}.progress-text{margin-top:5px;font-size:12px;color:var(--muted)}
+    @media (max-width:900px){.data-grid{grid-template-columns:1fr 1fr}.import-summary{grid-template-columns:1fr 1fr}}
+    @media (max-width:560px){.data-grid{grid-template-columns:1fr}.import-summary{grid-template-columns:1fr 1fr}}
+
   </style>
 </head>
 <body>
@@ -97,6 +127,7 @@
       <button class="nav-btn" data-page="report" type="button">📊 Laporan</button>
       <button class="nav-btn admin-only hidden" data-page="audit" type="button">📜 Audit Log</button>
       <button class="nav-btn admin-only hidden" data-page="users" type="button">👥 Pengguna</button>
+      <button class="nav-btn admin-only hidden" data-page="data" type="button">🗃️ Data</button>
       <div class="nav-title">Periode</div>
       <div class="field" style="padding:0 6px"><label for="yearSelect">Tahun</label><select id="yearSelect"></select></div>
       <div class="field" style="padding:0 6px"><label for="monthSelect">Bulan</label><select id="monthSelect"></select></div>
@@ -153,6 +184,51 @@
       <section id="page-audit" class="page hidden"><div class="page-head"><div><h2>Audit Log</h2><p>Riwayat aktivitas pengguna.</p></div></div><div class="panel"><div id="auditTable" class="table-wrap"></div></div></section>
 
       <section id="page-users" class="page hidden"><div class="page-head"><div><h2>Pengguna</h2><p>Kelola status akses pengguna.</p></div></div><div class="panel"><div class="panel-body"><div class="hint" style="margin-bottom:12px">Pembuatan akun email/password tetap dilakukan di Firebase Authentication. Di sini Admin mengatur profil role dan status aktif.</div><div id="usersTable" class="table-wrap"></div></div></div></section>
+
+      <section id="page-data" class="page hidden">
+        <div class="page-head"><div><h2>Data</h2><p>Import, export, dan template data PO. Khusus Admin.</p></div></div>
+        <div class="data-grid">
+          <div class="data-card">
+            <div class="data-icon">📥</div><h3>Import Excel</h3>
+            <p>Import histori PO 2021 dan seterusnya. Sistem akan preview, validasi, dan melewati duplikat sebelum data masuk Firestore.</p>
+            <input id="dataImportFile" class="input" type="file" accept=".xlsx,.xls,.csv">
+            <div class="actions" style="margin-top:10px"><button id="dataPreviewBtn" class="btn btn-primary" type="button">🔎 Preview & Validasi</button><button id="dataImportBtn" class="btn btn-success" type="button" disabled>📥 Import Data</button></div>
+          </div>
+          <div class="data-card">
+            <div class="data-icon">📤</div><h3>Export Semua Data</h3>
+            <p>Unduh seluruh histori PO yang tersedia di Firestore untuk backup atau pengolahan di Excel.</p>
+            <button id="dataExportBtn" class="btn btn-outline" type="button">📊 Export Excel</button>
+          </div>
+          <div class="data-card">
+            <div class="data-icon">📄</div><h3>Template Excel</h3>
+            <p>Template standar untuk menyiapkan data historis sebelum di-import ke aplikasi.</p>
+            <button id="dataTemplateBtn" class="btn btn-outline" type="button">⬇️ Download Template</button>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head"><h3>Ketentuan Import</h3><span class="muted" style="font-size:12px">Format yang disarankan</span></div>
+          <div class="panel-body">
+            <div class="hint">Kolom utama: <strong>Tgl Kirim</strong>, <strong>Tgl Kembali</strong>, <strong>No PO</strong>, <strong>Nama Customer</strong>, <strong>Keterangan</strong>, dan <strong>Register</strong>. Tanggal boleh berupa tanggal Excel atau format dd/mm/yyyy. Register boleh berupa BZOA26-A maupun BZOA26A.</div>
+          </div>
+        </div>
+        <div id="importPreviewPanel" class="panel import-preview hidden">
+          <div class="panel-head"><h3>Preview Import</h3><span id="importPreviewFile" class="muted" style="font-size:12px"></span></div>
+          <div class="panel-body">
+            <div class="import-summary">
+              <div class="import-pill"><small>Total Baris</small><strong id="importTotal">0</strong></div>
+              <div class="import-pill"><small>Siap Import</small><strong id="importReady">0</strong></div>
+              <div class="import-pill"><small>Duplikat</small><strong id="importDuplicate">0</strong></div>
+              <div class="import-pill"><small>Error</small><strong id="importError">0</strong></div>
+            </div>
+            <div id="importPreviewTable" class="import-table"></div>
+            <div id="importProgressWrap" class="progress-wrap hidden"><div class="progress-track"><div id="importProgressBar" class="progress-bar"></div></div><div id="importProgressText" class="progress-text"></div></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-head"><h3>Riwayat Import</h3><span class="muted" style="font-size:12px">Audit aktivitas import</span></div>
+          <div class="panel-body"><div id="importHistoryTable" class="table-wrap"><div class="empty">Belum dimuat.</div></div></div>
+        </div>
+      </section>
 
     </main>
   </div>

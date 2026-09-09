@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const APP_VERSION = "1.10.0-final-audit";
+const APP_VERSION = "1.12.0-data-import";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhzrMhSPA_S8keOjU6QL2Tath3jFBY9Vs",
@@ -38,7 +38,9 @@ let state = {
   pendingVoice: null,
   scanner: { stream: null, detector: null, fallbackReader: null, fallbackPromise: null, raf: 0, running: false, scanning: false },
   barcodeSvg: "",
-  barcodePO: ""
+  barcodePO: "",
+  importPreview: null,
+  xlsxLibraryPromise: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -131,6 +133,97 @@ function resolveStoredPeriod(po) {
 }
 function currentCode() { return state.registerGroup ? getRegisterCode(state.registerGroup, state.year, state.month) : ""; }
 function isAdmin() { return state.profile?.role === "admin"; }
+
+function periodStorageKey(){
+  return `poTracking.period.${state.user?.uid || "guest"}`;
+}
+function loadSavedPeriod(){
+  try{
+    const raw=localStorage.getItem(periodStorageKey());
+    if(!raw)return false;
+    const data=JSON.parse(raw);
+    const y=Number(data?.year),m=Number(data?.month);
+    if(y>=YEAR_START && y<=currentYear+1 && m>=1 && m<=12){state.year=y;state.month=m;return true;}
+  }catch(err){console.warn("Gagal membaca periode tersimpan",err);}
+  return false;
+}
+function saveCurrentPeriod(){
+  try{localStorage.setItem(periodStorageKey(),JSON.stringify({year:state.year,month:state.month}));}catch(err){console.warn("Gagal menyimpan periode",err);}
+}
+function parseImportDate(value){
+  if(value===null || value===undefined || value==="") return "";
+  if(value instanceof Date && !Number.isNaN(value.getTime())) return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,"0")}-${String(value.getDate()).padStart(2,"0")}`;
+  if(typeof value==="number" && Number.isFinite(value)){
+    // Excel serial date (1900 date system).
+    const utc = new Date(Date.UTC(1899,11,30) + Math.round(value)*86400000);
+    if(!Number.isNaN(utc.getTime())) return `${utc.getUTCFullYear()}-${String(utc.getUTCMonth()+1).padStart(2,"0")}-${String(utc.getUTCDate()).padStart(2,"0")}`;
+  }
+  const s=String(value).trim();
+  if(!s)return "";
+  let m=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if(m)return `${m[1]}-${String(Number(m[2])).padStart(2,"0")}-${String(Number(m[3])).padStart(2,"0")}`;
+  m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if(m)return `${m[3]}-${String(Number(m[2])).padStart(2,"0")}-${String(Number(m[1])).padStart(2,"0")}`;
+  const d=new Date(s);
+  if(!Number.isNaN(d.getTime()))return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return "";
+}
+function normalizeHeader(value){return String(value??"").trim().toLowerCase().replace(/[._\-\/]+/g," ").replace(/\s+/g," ");}
+function findHeader(row,variants){
+  const map={};
+  Object.keys(row||{}).forEach(k=>map[normalizeHeader(k)]=k);
+  for(const v of variants){const key=normalizeHeader(v);if(map[key])return map[key];}
+  return null;
+}
+function parseRegisterInput(value,sendDate){
+  const raw=String(value??"").trim().toUpperCase();
+  const compact=raw.replace(/[^A-Z0-9]/g,"");
+  for(const g of GROUPS){
+    if(compact.startsWith(g) && compact.length>=g.length+3){
+      const yy=Number(compact.slice(g.length,g.length+2));
+      const letter=compact.slice(g.length+2,g.length+3);
+      const m=letter>="A"&&letter<="L"?letter.charCodeAt(0)-64:0;
+      if(yy>=0&&m){return {group:g,year:2000+yy,month:m,code:getRegisterCode(g,2000+yy,m)};}
+    }
+  }
+  const date=sendDate?parseImportDate(sendDate):"";
+  if(date){const year=Number(date.slice(0,4)),month=Number(date.slice(5,7));for(const g of GROUPS){if(compact===g) return {group:g,year,month,code:getRegisterCode(g,year,month)};}}
+  return null;
+}
+function inferRegisterFromPO(noPO,sendDate){
+  const raw=String(noPO??"").trim().toUpperCase().replace(/\s+/g,"");
+  const date=parseImportDate(sendDate);
+  for(const g of GROUPS){
+    if(raw.startsWith(g)){
+      const rest=raw.slice(g.length).replace(/[^A-Z0-9]/g,"");
+      const yy=Number(rest.slice(0,2)),letter=rest.slice(2,3);
+      const m=letter>="A"&&letter<="L"?letter.charCodeAt(0)-64:0;
+      if(yy>=0&&m)return {group:g,year:2000+yy,month:m,code:getRegisterCode(g,2000+yy,m)};
+      if(date){const y=Number(date.slice(0,4)),mo=Number(date.slice(5,7));return {group:g,year:y,month:mo,code:getRegisterCode(g,y,mo)};}
+    }
+  }
+  return null;
+}
+async function loadXLSXLibrary(){
+  if(state.xlsxLibraryPromise)return state.xlsxLibraryPromise;
+  if(window.XLSX)return Promise.resolve(window.XLSX);
+  state.xlsxLibraryPromise=(async()=>{
+    try{
+      const mod=await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+      return mod?.default?.read ? mod.default : mod;
+    }catch(primaryError){
+      console.warn("ESM SheetJS gagal, mencoba UMD fallback.",primaryError);
+      return await new Promise((resolve,reject)=>{
+        const existing=document.querySelector('script[data-xlsx-loader="1"]');
+        if(existing){existing.addEventListener("load",()=>resolve(window.XLSX));existing.addEventListener("error",()=>reject(primaryError));return;}
+        const script=document.createElement("script");script.src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";script.async=true;script.dataset.xlsxLoader="1";
+        script.onload=()=>window.XLSX?resolve(window.XLSX):reject(new Error("Library Excel tidak menyediakan objek XLSX."));
+        script.onerror=()=>reject(primaryError);document.head.appendChild(script);
+      });
+    }
+  })();
+  try{return await state.xlsxLibraryPromise;}catch(err){state.xlsxLibraryPromise=null;throw err;}
+}
 function hexToRgba(hex, alpha) {
   const m = String(hex || "").replace("#", "");
   if (m.length !== 6) return `rgba(37,99,235,${alpha})`;
@@ -254,6 +347,7 @@ function navigate(page) {
   if(page==="report") renderReport();
   if(page==="audit") loadAudit();
   if(page==="users") loadUsers();
+  if(page==="data") loadImportHistory();
 }
 function renderDashboard(){updateStats();}
 async function openRegister(group){ state.registerGroup=group; $("registerTitle").textContent=getRegisterCode(group,state.year,state.month); populateRegisterSelect(group); navigate("register"); }
@@ -837,31 +931,8 @@ async function loadZXingFallback(){
   if(state.scanner.fallbackPromise) return state.scanner.fallbackPromise;
   state.scanner.fallbackPromise=(async()=>{
     try{
-      if(window.ZXingBrowser?.BrowserMultiFormatReader){
-        state.scanner.fallbackReader=new window.ZXingBrowser.BrowserMultiFormatReader();
-        return state.scanner.fallbackReader;
-      }
-      const existing=document.querySelector('script[data-zxing-browser="1"]');
-      if(existing){
-        await new Promise((resolve,reject)=>{
-          if(window.ZXingBrowser?.BrowserMultiFormatReader) return resolve();
-          const done=()=>window.ZXingBrowser?.BrowserMultiFormatReader?resolve():reject(new Error('ZXing global tidak tersedia setelah script dimuat.'));
-          existing.addEventListener('load',done,{once:true});
-          existing.addEventListener('error',()=>reject(new Error('Gagal memuat library barcode.')),{once:true});
-          setTimeout(done,4500);
-        });
-      }else{
-        await new Promise((resolve,reject)=>{
-          const script=document.createElement('script');
-          script.src='https://unpkg.com/@zxing/browser@0.2.1/umd/zxing-browser.min.js';
-          script.async=true;
-          script.dataset.zxingBrowser='1';
-          script.onload=()=>resolve();
-          script.onerror=()=>reject(new Error('Gagal memuat ZXing dari CDN.'));
-          document.head.appendChild(script);
-        });
-      }
-      const Reader=window.ZXingBrowser?.BrowserMultiFormatReader;
+      const mod=await import('https://cdn.jsdelivr.net/npm/@zxing/browser@0.2.1/+esm');
+      const Reader=mod.BrowserMultiFormatReader;
       if(!Reader) throw new Error('ZXing BrowserMultiFormatReader tidak tersedia.');
       state.scanner.fallbackReader=new Reader();
       return state.scanner.fallbackReader;
@@ -883,7 +954,7 @@ async function startZXingFallback(){
   const reader=await loadZXingFallback();
   if(!reader || !state.scanner.running) return false;
   try{
-    setScannerStatus('Mode kompatibilitas aktif. Mencari barcode...','info');
+    setScannerStatus('Scanner kompatibel aktif. Mencari barcode...','info');
     const video=$('cameraVideo');
     state.scanner.fallbackPromise=reader.decodeFromVideoElementContinuously(video,(result)=>{
       if(result && state.scanner.running){
@@ -1255,14 +1326,157 @@ function printReport(){
   }
 }
 
-async function initUser(user){state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()){await signOut(auth);toast("Akun belum memiliki profil users di Firestore.","error");return}state.profile=snap.data();if(state.profile.active===false){await signOut(auth);toast("Akun Anda dinonaktifkan.","error");return}$("loginScreen").classList.add("hidden");$("appScreen").classList.remove("hidden");$("topUserName").textContent=state.profile.name||user.email;$("topUserRole").textContent=state.profile.role||"staff";document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",!isAdmin()));populatePeriods();populateReportFilters();renderRegisterNav();await refresh();navigate("dashboard");}
+
+function importRowCellClass(status){return status==="ready"?"import-ok":status==="duplicate"?"import-skip":"import-error";}
+function renderImportPreview(){
+  const p=state.importPreview;
+  const panel=$("importPreviewPanel");
+  if(!p){panel.classList.add("hidden");$("dataImportBtn").disabled=true;return;}
+  panel.classList.remove("hidden");
+  $("importPreviewFile").textContent=p.fileName||"";
+  $("importTotal").textContent=String(p.total);
+  $("importReady").textContent=String(p.ready.length);
+  $("importDuplicate").textContent=String(p.duplicates.length);
+  $("importError").textContent=String(p.errors.length);
+  const combined=[...p.ready.map(x=>({...x,_state:"ready"})),...p.duplicates.map(x=>({...x,_state:"duplicate"})),...p.errors.map(x=>({...x,_state:"error"}))].slice(0,250);
+  if(!combined.length){$("importPreviewTable").innerHTML='<div class="empty">Tidak ada baris yang dapat diproses.</div>';}else{
+    let html='<table><thead><tr><th>Baris</th><th>Status</th><th>Register</th><th>Tgl Kirim</th><th>Tgl Kembali</th><th>No PO</th><th>Customer</th><th>Keterangan</th><th>Catatan</th></tr></thead><tbody>';
+    combined.forEach(r=>{const note=r.reason||"Siap";html+=`<tr><td>${r.rowNumber}</td><td class="${importRowCellClass(r._state)}">${r._state==="ready"?"Siap Import":r._state==="duplicate"?"Duplikat": "Error"}</td><td>${escapeHTML(r.registerCode||"-")}</td><td>${escapeHTML(formatDate(r.tglKirim))}</td><td>${escapeHTML(formatDate(r.tglKembali))}</td><td><strong>${escapeHTML(r.noPO||"")}</strong></td><td>${escapeHTML(r.namaCustomer||"")}</td><td>${escapeHTML(r.keterangan||"")}</td><td>${escapeHTML(note)}</td></tr>`});
+    html+='</tbody></table>';$("importPreviewTable").innerHTML=html;
+  }
+  $("dataImportBtn").disabled=!(p.ready.length>0 && p.errors.length===0);
+}
+async function previewImportFile(){
+  if(!isAdmin())return;
+  const file=$("dataImportFile").files?.[0];
+  if(!file){toast("Pilih file Excel terlebih dahulu.","warn");return;}
+  try{
+    showLoading(true);
+    const XLSX=await loadXLSXLibrary();
+    const buffer=await file.arrayBuffer();
+    const workbook=XLSX.read(buffer,{type:"array",cellDates:true});
+    const sheetName=workbook.SheetNames?.[0];
+    if(!sheetName)throw new Error("Sheet Excel tidak ditemukan.");
+    const sheet=workbook.Sheets[sheetName];
+    const rows=XLSX.utils.sheet_to_json(sheet,{defval:"",raw:true});
+    if(!rows.length)throw new Error("File Excel tidak memiliki data.");
+    const sample=rows[0];
+    const headers={
+      send:findHeader(sample,["Tgl Kirim","Tanggal Kirim","Tanggal Pengiriman","Tgl Pengiriman"]),
+      ret:findHeader(sample,["Tgl Kembali","Tanggal Kembali","Tanggal Penerimaan"]),
+      po:findHeader(sample,["No PO","No. PO","PO","Nomor PO"]),
+      customer:findHeader(sample,["Nama Customer","Customer","Nama Pelanggan"]),
+      note:findHeader(sample,["Keterangan","Keterangan PO","Catatan"]),
+      register:findHeader(sample,["Register","Register Code","Kode Register"])
+    };
+    if(!headers.send || !headers.po || !headers.customer)throw new Error("Kolom wajib belum lengkap. Minimal: Tgl Kirim, No PO, Nama Customer.");
+    const ready=[],duplicates=[],errors=[],seen=new Set();
+    rows.forEach((row,index)=>{
+      const rowNumber=index+2;
+      const tglKirim=parseImportDate(row[headers.send]);
+      const tglKembali=headers.ret?parseImportDate(row[headers.ret]):"";
+      const noPO=String(row[headers.po]??"").trim().toUpperCase();
+      const customer=String(row[headers.customer]??"").trim();
+      const note=headers.note?String(row[headers.note]??"").trim():"";
+      const suppliedRegister=headers.register?String(row[headers.register]??"").trim():"";
+      let regInfo=suppliedRegister?parseRegisterInput(suppliedRegister,tglKirim):null;
+      if(!regInfo)regInfo=inferRegisterFromPO(noPO,tglKirim);
+      const rowError=[];
+      if(!tglKirim)rowError.push("Tgl Kirim tidak valid/kosong");
+      if(tglKembali && tglKembali<tglKirim)rowError.push("Tgl Kembali sebelum Tgl Kirim");
+      if(!noPO)rowError.push("No PO kosong");
+      if(!customer)rowError.push("Nama Customer kosong");
+      if(suppliedRegister && !parseRegisterInput(suppliedRegister,tglKirim))rowError.push("Format Register tidak dikenali");
+      if(regInfo && tglKirim && (regInfo.year!==Number(tglKirim.slice(0,4)) || regInfo.month!==Number(tglKirim.slice(5,7))))rowError.push("Register tidak sesuai dengan bulan/tahun Tgl Kirim");
+      if(!regInfo)rowError.push("Register tidak dikenali dan tidak dapat diinfer dari No PO");
+      if(rowError.length){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo?.code||"",reason:rowError.join("; ")});return;}
+      const unique=normalizePO(noPO);
+      if(!unique){errors.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"No PO tidak dapat dinormalisasi"});return;}
+      if(seen.has(unique)){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:"Duplikat dalam file import"});return;}
+      seen.add(unique);
+      const existing=state.allPOs.find(po=>normalizePO(po.noPO)===unique);
+      if(existing){duplicates.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerCode:regInfo.code,reason:`Sudah ada di aplikasi (${displayRegisterCode(existing)})`});return;}
+      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique});
+    });
+    state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,createdAt:Date.now()};
+    renderImportPreview();
+    if(errors.length)toast(`Preview selesai: ${ready.length} siap, ${duplicates.length} duplikat, ${errors.length} error.`,"warn");
+    else toast(`Preview selesai: ${ready.length} data siap di-import.`,"success");
+  }catch(err){console.error(err);toast(err?.message||"Gagal membaca file Excel.","error");state.importPreview=null;renderImportPreview();}
+  finally{showLoading(false)}
+}
+async function importPreviewData(){
+  if(!isAdmin())return;
+  const p=state.importPreview;
+  if(!p || !p.ready.length){toast("Tidak ada data valid untuk di-import.","warn");return;}
+  if(p.errors.length){toast("Perbaiki baris yang error terlebih dahulu. Data belum bisa di-import.","error");return;}
+  if(!confirm(`Import ${p.ready.length} PO dari ${p.fileName}? Duplikat sudah dilewati dan tidak akan menimpa data yang ada.`))return;
+  try{
+    showLoading(true);$("dataImportBtn").disabled=true;$("importProgressWrap").classList.remove("hidden");
+    const chunkSize=200;const total=p.ready.length;let done=0;
+    for(let start=0;start<total;start+=chunkSize){
+      const chunk=p.ready.slice(start,start+chunkSize);const batch=writeBatch(db);
+      chunk.forEach(item=>{
+        const ref=doc(collection(db,"po_documents"));
+        batch.set(ref,{registerGroup:item.registerGroup,year:item.year,month:item.month,registerCode:item.registerCode,tglKirim:item.tglKirim,tglKembali:item.tglKembali||null,noPO:item.noPO,uniqueKey:item.uniqueKey,namaCustomer:item.namaCustomer,keterangan:item.keterangan,status:item.tglKembali?"SUDAH_KEMBALI":"BELUM_KEMBALI",createdAt:serverTimestamp(),createdBy:state.user.uid,updatedAt:serverTimestamp(),updatedBy:state.user.uid});
+        batch.set(doc(db,"po_unique",item.uniqueKey),{noPO:item.noPO,poId:ref.id,createdAt:serverTimestamp(),createdBy:state.user.uid});
+      });
+      await batch.commit();
+      done+=chunk.length;const pct=Math.round(done/total*100);$("importProgressBar").style.width=`${pct}%`;$("importProgressText").textContent=`${done} / ${total} PO (${pct}%)`;
+    }
+    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${p.ready.length} PO berhasil, ${p.duplicates.length} duplikat dilewati.`);
+    toast(`${p.ready.length} PO berhasil di-import.`,"success");
+    state.importPreview=null;renderImportPreview();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");await refresh();await loadImportHistory();
+  }catch(err){console.error(err);toast("Import gagal. Batch sebelumnya yang sudah committed tetap tersimpan; ulangi hanya untuk data yang belum masuk setelah pemeriksaan.","error");}
+  finally{showLoading(false)}
+}
+function exportRowsAsObjects(rows){
+  return rows.map((po,i)=>({No:i+1,Register:displayRegisterCode(po),"Tgl Kirim":formatDate(po.tglKirim),"Tgl Kembali":formatDate(po.tglKembali),"No PO":po.noPO||"","Nama Customer":po.namaCustomer||"",Keterangan:po.keterangan||"",Status:getStatus(po)==="SUDAH_KEMBALI"?"Sudah Kembali":"Belum Kembali"}));
+}
+async function exportAllDataExcel(){
+  if(!isAdmin())return;
+  try{
+    showLoading(true);const XLSX=await loadXLSXLibrary();const wb=XLSX.utils.book_new();const data=exportRowsAsObjects([...state.allPOs].sort(comparePO));
+    const ws=XLSX.utils.json_to_sheet(data);XLSX.utils.book_append_sheet(wb,ws,"PO Data");
+    const meta=[{Keterangan:"Export seluruh data PO",Tanggal:todayISO(),Jumlah:data.length}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(meta),"Info");
+    XLSX.writeFile(wb,`PO_Tracking_All_${todayISO().replace(/-/g,"")}.xlsx`);toast(`Export ${data.length} PO berhasil.`,"success");
+  }catch(err){console.error(err);toast("Gagal membuat file Excel. Pastikan koneksi internet tersedia untuk library Excel.","error");}
+  finally{showLoading(false)}
+}
+async function downloadImportTemplate(){
+  try{
+    showLoading(true);const XLSX=await loadXLSXLibrary();const wb=XLSX.utils.book_new();
+    const rows=[
+      {"Tgl Kirim":"01/01/2021","Tgl Kembali":"05/01/2021","No PO":"BZOA21A001","Nama Customer":"Contoh Customer","Keterangan":"Contoh data","Register":"BZOA21-A"},
+      {"Tgl Kirim":"02/02/2021","Tgl Kembali":"","No PO":"BZOB21A001","Nama Customer":"Customer B","Keterangan":"","Register":"BZOB21-B"}
+    ];
+    const ws=XLSX.utils.json_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,"Template Import");
+    const info=[{"Kolom":"Tgl Kirim","Wajib":"Ya","Keterangan":"Tanggal kirim; dipakai untuk menentukan tahun/bulan jika register tidak lengkap."},{"Kolom":"Tgl Kembali","Wajib":"Tidak","Keterangan":"Kosongkan jika belum kembali."},{"Kolom":"No PO","Wajib":"Ya","Keterangan":"No PO asli, jangan diubah."},{"Kolom":"Nama Customer","Wajib":"Ya","Keterangan":"Nama customer."},{"Kolom":"Keterangan","Wajib":"Tidak","Keterangan":"Catatan PO."},{"Kolom":"Register","Wajib":"Disarankan","Keterangan":"Contoh BZOA21-A atau BZOA21A."}];XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(info),"Petunjuk");
+    XLSX.writeFile(wb,"Template_Import_PO.xlsx");toast("Template Excel berhasil dibuat.","success");
+  }catch(err){console.error(err);toast("Gagal membuat template Excel.","error");}
+  finally{showLoading(false)}
+}
+async function loadImportHistory(){
+  if(!isAdmin())return;
+  const el=$("importHistoryTable");if(!el)return;el.innerHTML='<div class="empty">⏳ Memuat riwayat import...</div>';
+  try{
+    const snap=await getDocs(query(collection(db,"audit_logs"),orderBy("timestamp","desc")));
+    const rows=snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.action==="IMPORT_EXCEL").slice(0,50);
+    if(!rows.length){el.innerHTML='<div class="empty">Belum ada riwayat import Excel.</div>';return;}
+    let html='<table><thead><tr><th>Waktu</th><th>User</th><th>Aksi</th><th>Keterangan</th></tr></thead><tbody>';
+    rows.forEach(r=>{const t=r.timestamp?.toDate?r.timestamp.toDate().toLocaleString("id-ID"):"-";html+=`<tr><td>${escapeHTML(t)}</td><td>${escapeHTML(r.userName||"-")}</td><td><strong>${escapeHTML(r.action)}</strong></td><td>${escapeHTML(r.details||"-")}</td></tr>`});
+    html+='</tbody></table>';el.innerHTML=html;
+  }catch(err){console.error(err);el.innerHTML='<div class="empty">Gagal memuat riwayat import.</div>';}
+}
+
+async function initUser(user){state.user=user;const snap=await getDoc(doc(db,"users",user.uid));if(!snap.exists()){await signOut(auth);toast("Akun belum memiliki profil users di Firestore.","error");return}state.profile=snap.data();if(state.profile.active===false){await signOut(auth);toast("Akun Anda dinonaktifkan.","error");return}loadSavedPeriod();$("loginScreen").classList.add("hidden");$("appScreen").classList.remove("hidden");$("topUserName").textContent=state.profile.name||user.email;$("topUserRole").textContent=state.profile.role||"staff";document.querySelectorAll(".admin-only").forEach(el=>el.classList.toggle("hidden",!isAdmin()));populatePeriods();populateReportFilters();renderRegisterNav();await refresh();navigate("dashboard");}
 
 $("loginForm").addEventListener("submit",async e=>{e.preventDefault();$("loginBtn").disabled=true;$("loginBtn").textContent="⏳ Login...";try{await signInWithEmailAndPassword(auth,$("loginEmail").value.trim(),$("loginPassword").value)}catch(err){console.error(err);toast(err.code==="auth/invalid-credential"?"Email atau password salah.":"Login gagal. Cek email, password, dan konfigurasi Firebase.","error");}finally{$("loginBtn").disabled=false;$("loginBtn").textContent="🔐 Login";}});
 $("logoutBtn").addEventListener("click",()=>signOut(auth));
 $("mobileMenuBtn").addEventListener("click",()=>$("sidebar").classList.toggle("open"));
 document.querySelectorAll(".nav-btn[data-page]").forEach(btn=>btn.addEventListener("click",()=>navigate(btn.dataset.page)));
-$("yearSelect").addEventListener("change",async()=>{state.year=Number($("yearSelect").value);state.registerGroup=null;state.month=state.month;state.periodPOs=state.allPOs.filter(po=>resolveStoredPeriod(po).year===state.year&&resolveStoredPeriod(po).month===state.month);populateReportFilters();await refresh();});
-$("monthSelect").addEventListener("change",async()=>{state.month=Number($("monthSelect").value);state.registerGroup=null;state.periodPOs=state.allPOs.filter(po=>resolveStoredPeriod(po).year===state.year&&resolveStoredPeriod(po).month===state.month);populateReportFilters();await refresh();});
+$("yearSelect").addEventListener("change",async()=>{state.year=Number($("yearSelect").value);state.registerGroup=null;saveCurrentPeriod();populateReportFilters();await refresh();});
+$("monthSelect").addEventListener("change",async()=>{state.month=Number($("monthSelect").value);state.registerGroup=null;saveCurrentPeriod();populateReportFilters();await refresh();});
 $("dashboardAdd").addEventListener("click",()=>openPOForm());$("manualQuick").addEventListener("click",()=>openPOForm());$("voiceQuick").addEventListener("click",openVoice);$("scanQuick").addEventListener("click",()=>{stopCamera();$("scanModal").classList.remove("hidden");});
 $("registerBack").addEventListener("click",()=>navigate("dashboard"));$("registerAdd").addEventListener("click",()=>openPOForm());
 ["regSearch","regFrom","regTo","regStatus"].forEach(id=>$(id).addEventListener("input",renderCurrentRegister));$("regReset").addEventListener("click",()=>{["regSearch","regFrom","regTo"].forEach(id=>$(id).value="");$("regStatus").value="ALL";renderCurrentRegister()});
@@ -1291,5 +1505,12 @@ document.addEventListener("click",e=>{
 });
 document.addEventListener("visibilitychange",()=>{ if(document.hidden) { stopCamera(); stopVoice(); } });
 
+
+
+$("dataPreviewBtn").addEventListener("click",previewImportFile);
+$("dataImportBtn").addEventListener("click",importPreviewData);
+$("dataExportBtn").addEventListener("click",exportAllDataExcel);
+$("dataTemplateBtn").addEventListener("click",downloadImportTemplate);
+$("dataImportFile").addEventListener("change",()=>{state.importPreview=null;renderImportPreview();$("importPreviewFile").textContent=$("dataImportFile").files?.[0]?.name||"";});
 
 onAuthStateChanged(auth,user=>{if(user)initUser(user).catch(err=>{console.error(err);toast("Gagal memuat profil pengguna.","error")});else{$("loginScreen").classList.remove("hidden");$("appScreen").classList.add("hidden");}});

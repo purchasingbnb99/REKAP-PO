@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.0.0/firebas
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-auth.js";
 import { getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc, query, orderBy, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/12.0.0/firebase-firestore.js";
 
-const APP_VERSION = "1.15.0-bulk-dedup";
+const APP_VERSION = "1.16.0-register-period-independent";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDhzrMhSPA_S8keOjU6QL2Tath3jFBY9Vs",
@@ -1381,6 +1381,7 @@ async function exportImportRows(rows,filename,sheetName){
       "No PO":r.noPO||"",
       "Nama Customer":r.namaCustomer||"",
       Keterangan:r.keterangan||"",
+      "Peringatan":r.warning||"",
       "Alasan/Error":r.reason||""
     }));
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(data),sheetName||"Data");
@@ -1397,7 +1398,8 @@ function renderImportDiagnostics(p){
   if(!summary||!errorTable)return;
   if(!p){summary.innerHTML="";errorTable.innerHTML="";errorTable.classList.add("hidden");if(errorBtn)errorBtn.disabled=true;if(readyBtn)readyBtn.disabled=true;return;}
   const cats=getImportErrorCategories(p.errors);
-  let html=`<div><strong>Diagnostik Import</strong> — ${p.errors.length} baris error tersimpan selama sesi ini. ${p.errors.length?"Perbaiki Excel lalu Preview ulang; data error tidak ikut di-import.":"Tidak ada error."}</div>`;
+  const warningCount=(p.ready||[]).filter(x=>x.warning).length;
+  let html=`<div><strong>Diagnostik Import</strong> — ${p.errors.length} baris error tersimpan selama sesi ini. ${p.errors.length?"Perbaiki Excel lalu Preview ulang; data error tidak ikut di-import.":"Tidak ada error."}${warningCount?` <span class="muted">${warningCount} baris valid memiliki peringatan bisnis dan tetap dapat di-import.</span>`:""}</div>`;
   if(cats.length){html+='<div class="import-diagnostics-grid">';cats.forEach(([name,count])=>{html+=`<div class="import-diagnostic-item"><strong>${count}×</strong> ${escapeHTML(name)}</div>`});html+='</div>';}
   summary.innerHTML=html;
   if(errorBtn)errorBtn.disabled=!p.errors.length;
@@ -1422,7 +1424,7 @@ function renderImportPreview(){
   const combined=[...p.ready.map(x=>({...x,_state:"ready"})),...p.duplicates.map(x=>({...x,_state:"duplicate"})),...p.errors.map(x=>({...x,_state:"error"}))].slice(0,250);
   if(!combined.length){$("importPreviewTable").innerHTML='<div class="empty">Tidak ada baris yang dapat diproses.</div>';}else{
     let html='<table><thead><tr><th>Baris</th><th>Status</th><th>Register</th><th>Tgl Kirim</th><th>Tgl Kembali</th><th>No PO</th><th>Customer</th><th>Keterangan</th><th>Catatan</th></tr></thead><tbody>';
-    combined.forEach(r=>{const note=r.reason||"Siap";html+=`<tr><td>${r.rowNumber}</td><td class="${importRowCellClass(r._state)}">${r._state==="ready"?"Siap Import":r._state==="duplicate"?"Duplikat": "Error"}</td><td>${escapeHTML(r.registerCode||"-")}</td><td>${escapeHTML(formatDate(r.tglKirim))}</td><td>${escapeHTML(formatDate(r.tglKembali))}</td><td><strong>${escapeHTML(r.noPO||"")}</strong></td><td>${escapeHTML(r.namaCustomer||"")}</td><td>${escapeHTML(r.keterangan||"")}</td><td>${escapeHTML(note)}</td></tr>`});
+    combined.forEach(r=>{const note=r.reason||r.warning||"Siap";html+=`<tr><td>${r.rowNumber}</td><td class="${importRowCellClass(r._state)}">${r._state==="ready"?"Siap Import":r._state==="duplicate"?"Duplikat": "Error"}</td><td>${escapeHTML(r.registerCode||"-")}</td><td>${escapeHTML(formatDate(r.tglKirim))}</td><td>${escapeHTML(formatDate(r.tglKembali))}</td><td><strong>${escapeHTML(r.noPO||"")}</strong></td><td>${escapeHTML(r.namaCustomer||"")}</td><td>${escapeHTML(r.keterangan||"")}</td><td>${escapeHTML(note)}</td></tr>`});
     html+='</tbody></table>';$("importPreviewTable").innerHTML=html;
   }
   $("dataImportBtn").disabled=!(p.ready.length>0);
@@ -1476,13 +1478,18 @@ async function previewImportFile(){
       let regInfo=suppliedRegister?parseRegisterInput(suppliedRegister,referenceDate):null;
       if(!regInfo)regInfo=inferRegisterFromPO(noPO,referenceDate);
       const rowError=[];
+      const warningMessages=[];
       if(rawSendPresent && !tglKirim)rowError.push("Tgl Kirim tidak valid");
       if(rawReturnPresent && !tglKembali)rowError.push("Tgl Kembali tidak valid");
       if(tglKirim && tglKembali && tglKembali<tglKirim)rowError.push("Tgl Kembali sebelum Tgl Kirim");
       if(!noPO)rowError.push("No PO kosong");
       if(!customer)rowError.push("Nama Customer kosong");
       if(suppliedRegister && !parseRegisterInput(suppliedRegister,referenceDate))rowError.push("Format Register tidak dikenali");
-      if(regInfo && tglKirim && (regInfo.year!==Number(tglKirim.slice(0,4)) || regInfo.month!==Number(tglKirim.slice(5,7))))rowError.push("Register tidak sesuai dengan bulan/tahun Tgl Kirim");
+      // KUNCI ATURAN BISNIS V1.16: Register adalah periode/identitas PO, bukan bulan aktual Tgl Kirim.
+      // Perbedaan periode Register vs Tgl Kirim hanya menjadi peringatan, bukan error, karena PO dapat terlambat dikirim.
+      if(regInfo && tglKirim && (regInfo.year!==Number(tglKirim.slice(0,4)) || regInfo.month!==Number(tglKirim.slice(5,7)))){
+        warningMessages.push(`Register ${regInfo.code} berbeda periode dengan Tgl Kirim ${tglKirim}; tetap valid karena Register mengikuti periode PO.`);
+      }
       if(!regInfo){
         rowError.push(tglKirim||tglKembali?"Register tidak dikenali. Isi Register atau gunakan No PO lengkap yang memuat kode register.":"Periode tidak dapat ditentukan. Isi Register atau gunakan No PO lengkap yang memuat tahun/bulan register.");
       }
@@ -1496,7 +1503,7 @@ async function previewImportFile(){
       // The precedence used for historical rows is: Register/No PO, then Tgl Kirim, then Tgl Kembali.
       const actualPeriodSource=suppliedRegister?"Register":(noPO && inferRegisterFromPO(noPO,referenceDate)?"No PO":(tglKirim?"Tgl Kirim":"Tgl Kembali"));
       if(!tglKirim)missingSendCount++;
-      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique,periodSource:actualPeriodSource});
+      ready.push({rowNumber,tglKirim,tglKembali,noPO,namaCustomer:customer,keterangan:note,registerGroup:regInfo.group,year:regInfo.year,month:regInfo.month,registerCode:regInfo.code,uniqueKey:unique,periodSource:actualPeriodSource,warning:warningMessages.join("; ")});
     });
     state.importPreview={fileName:file.name,total:rows.length,ready,duplicates,errors,missingSendCount,createdAt:Date.now()};
     saveImportDiagnostics();
@@ -1577,7 +1584,8 @@ async function importPreviewData(){
       $("importProgressBar").style.width=`${pct}%`;
       $("importProgressText").textContent=`${processed} / ${total} diperiksa (${pct}%) • Baru ${imported} • Dilewati ${skipped}`;
     }
-    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${imported} PO baru, ${skipped} sudah ada/dilewati, ${repaired} indeks po_unique diperbaiki${p.errors.length?`, ${p.errors.length} baris error tidak di-import`:""}.`);
+    const warningCount=(p.ready||[]).filter(x=>x.warning).length;
+    await writeAudit("IMPORT_EXCEL","","",`Import ${p.fileName}: ${imported} PO baru, ${skipped} sudah ada/dilewati, ${repaired} indeks po_unique diperbaiki${p.errors.length?`, ${p.errors.length} baris error tidak di-import`:""}${warningCount?`, ${warningCount} baris memiliki peringatan periode`:""}.`);
     toast(`Import selesai: ${imported} baru, ${skipped} dilewati${p.errors.length?`, ${p.errors.length} error tidak di-import`:""}.`,"success");
     state.importPreview=null;saveImportDiagnostics();$("dataImportFile").value="";$("importProgressWrap").classList.add("hidden");renderImportPreview();await refresh();await loadImportHistory();await scanDuplicateGroups();
   }catch(err){
